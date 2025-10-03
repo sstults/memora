@@ -16,7 +16,8 @@
     "test:unit": "npm run typecheck && vitest run --dir tests/unit",
     "test:integration": "npm run typecheck && vitest run --dir tests/integration",
     "test:e2e": "npm run typecheck && vitest run --dir tests/e2e",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "prepare": "husky"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.19.1",
@@ -32,6 +33,7 @@
     "eslint": "^9.10.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-import": "^2.30.0",
+    "husky": "^9.1.7",
     "prettier": "^3.3.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.4",
