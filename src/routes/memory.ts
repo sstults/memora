@@ -7,6 +7,7 @@ import { getClient } from "../services/os-client";
 import { embed } from "../services/embedder";
 import { scoreSalience, atomicSplit, summarizeIfLong, redact } from "../services/salience";
 import { crossRerank } from "../services/rerank";
+import { policyNumber, policyArray, retrievalNumber, retrievalArray } from "../services/config";
 
 import { requireContext } from "./context";
 import { buildBoolFilter, FilterOptions } from "../domain/filters";
@@ -435,28 +436,16 @@ function extractFacts(text: string, ctx: Context): Fact[] {
 
 // Very light policy accessors; consider loading YAML once in a config service.
 function getPolicy(path: string, dflt: number): number {
-  // Stub: replace with real config loader (e.g., read YAML in services/config.ts)
-  const table: Record<string, number> = {
-    "salience.min_score": 0.6,
-    "salience.max_chunk_tokens": 800,
-    "ttl.semantic_days": 180,
-    "stages.episodic.top_k": 25,
-    "stages.episodic.recent_days": 30,
-    "stages.semantic.top_k": 50,
-    "stages.semantic.ann_candidates": 200,
-    "stages.facts.top_k": 20,
-    "fusion.rrf_k": 60,
-    "diversity.lambda": 0.7,
-    "diversity.min_distance": 0.2,
-    "diversity.max_per_tag": 3,
-    "rerank.max_candidates": 64,
-    "rerank.budget_ms": 1000
-  };
-  return table[path] ?? dflt;
+  // Route keys to the correct YAML: memory_policies.yaml for salience/ttl, retrieval.yaml for the rest.
+  if (path.startsWith("salience.") || path.startsWith("ttl.")) {
+    return policyNumber(path, dflt);
+  }
+  return retrievalNumber(path, dflt);
 }
 function getPolicyArray(path: string, dflt: string[]): string[] {
-  const table: Record<string, string[]> = {
-    "filters.exclude_tags": ["secret", "sensitive"]
-  };
-  return table[path] ?? dflt;
+  // filters.* live under retrieval.yaml; others fall back to policies if added later.
+  if (path.startsWith("filters.")) {
+    return retrievalArray(path, dflt);
+  }
+  return policyArray(path, dflt);
 }
