@@ -61,7 +61,6 @@ export function sha256Hex(input: string | Uint8Array): string {
     throw new Error("sha256Hex called in async WebCrypto context; use sha256HexAsync instead.");
   }
   // Node built-in
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const crypto = require("crypto") as typeof import("crypto");
   const hash = crypto.createHash("sha256");
   hash.update(typeof input === "string" ? Buffer.from(input, "utf8") : Buffer.from(input));
@@ -97,7 +96,6 @@ function randomBase32(len: number): string {
     bytes = new Uint8Array(nBytes);
     (globalThis as any).crypto.getRandomValues(bytes);
   } else {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const crypto = require("crypto") as typeof import("crypto");
     bytes = crypto.randomBytes(nBytes);
   }
