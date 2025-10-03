@@ -1,13 +1,11 @@
 // src/routes/memory.ts
 // Memory write/retrieve/promote tools for Memora MCP.
 
-import { Server } from "@modelcontextprotocol/sdk";
 import { v4 as uuidv4 } from "uuid";
 
 import { getClient } from "../services/os-client";
 import { embed } from "../services/embedder";
 import { scoreSalience, atomicSplit, summarizeIfLong, redact } from "../services/salience";
-import { packSnippets } from "../services/packer";
 import { crossRerank } from "../services/rerank";
 
 import { requireContext } from "./context";
@@ -24,7 +22,6 @@ import {
 } from "../domain/types";
 
 // ---- Index names & knobs ----
-const METRICS_INDEX = process.env.MEMORA_METRICS_INDEX || "mem-metrics";
 const SEMANTIC_INDEX = process.env.MEMORA_SEMANTIC_INDEX || "mem-semantic";
 const FACTS_INDEX = process.env.MEMORA_FACTS_INDEX || "mem-facts";
 const EPISODIC_PREFIX = process.env.MEMORA_EPI_PREFIX || "mem-episodic-";
@@ -33,7 +30,7 @@ const DEFAULT_BUDGET = Number(process.env.MEMORA_DEFAULT_BUDGET || 12);
 const RERANK_ENABLED = process.env.MEMORA_RERANK_ENABLED === "true";
 
 // ---- Public registration ----
-export function registerMemory(server: Server) {
+export function registerMemory(server: any) {
   server.tool("memory.write", handleWrite);
   server.tool("memory.retrieve", handleRetrieve);
   server.tool("memory.promote", handlePromote);
@@ -71,7 +68,7 @@ async function handleWrite(req: any) {
   await client.index({
     index: episodicIndex,
     id: event.event_id,
-    document: flattenEventForIndex(event)
+    body: flattenEventForIndex(event)
   });
 
   // 2) Salience → semantic chunks + facts
@@ -115,9 +112,9 @@ async function handleWrite(req: any) {
       { index: { _index: SEMANTIC_INDEX, _id: c.mem_id } },
       flattenChunkForIndex(c)
     ]);
-    const resp = await client.bulk({ refresh: "true", body });
-    if (resp.errors) {
-      const items = (resp.items || []).filter((i: any) => i.index?.error);
+    const resp = await client.bulk({ refresh: true, body });
+    if (resp.body.errors) {
+      const items = (resp.body.items || []).filter((i: any) => (i as any).index?.error);
       throw new Error(`semantic_upsert errors: ${JSON.stringify(items.slice(0, 3))}`);
     }
     semantic_upserts = chunks.length;
@@ -130,9 +127,9 @@ async function handleWrite(req: any) {
       { index: { _index: FACTS_INDEX, _id: f.fact_id } },
       flattenFactForIndex(f)
     ]);
-    const resp = await client.bulk({ refresh: "false", body });
-    if (resp.errors) {
-      const items = (resp.items || []).filter((i: any) => i.index?.error);
+    const resp = await client.bulk({ refresh: false, body });
+    if (resp.body.errors) {
+      const items = (resp.body.items || []).filter((i: any) => (i as any).index?.error);
       throw new Error(`facts_upsert errors: ${JSON.stringify(items.slice(0, 3))}`);
     }
     facts_upserts = facts.length;
@@ -212,7 +209,8 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
     score: h.score,
     source: h.source,
     why: h.why,
-    tags: h.tags
+    tags: h.tags,
+    context: active
   }));
 
   return { snippets };
@@ -229,7 +227,7 @@ async function handlePromote(req: any) {
   await client.update({
     index: SEMANTIC_INDEX,
     id: mem_id,
-    doc: { task_scope: to_scope }
+    body: { doc: { task_scope: to_scope } }
   });
 
   return { ok: true, mem_id, scope: to_scope };
@@ -318,7 +316,7 @@ async function episodicSearch(client: any, q: RetrievalQuery, fopts: FilterOptio
   };
 
   const resp = await client.search({ index: `${EPISODIC_PREFIX}*`, body });
-  return (resp.hits?.hits || []).map((hit: any, i: number) => ({
+  return (resp.body.hits?.hits || []).map((hit: any, i: number) => ({
     id: `evt:${hit._id}`,
     text: hit._source?.content || "",
     score: hit._score ?? 0,
@@ -350,7 +348,7 @@ async function semanticSearch(client: any, q: RetrievalQuery, fopts: FilterOptio
   };
 
   const resp = await client.search({ index: SEMANTIC_INDEX, body });
-  return (resp.hits?.hits || []).map((hit: any, i: number) => ({
+  return (resp.body.hits?.hits || []).map((hit: any, i: number) => ({
     id: `mem:${hit._id}`,
     text: hit._source?.text || "",
     score: hit._score ?? 0,
@@ -380,7 +378,7 @@ async function factsSearch(client: any, q: RetrievalQuery, fopts: FilterOptions)
     }
   };
   const resp = await client.search({ index: FACTS_INDEX, body });
-  return (resp.hits?.hits || []).map((hit: any, i: number) => ({
+  return (resp.body.hits?.hits || []).map((hit: any, i: number) => ({
     id: `fact:${hit._id}`,
     text: `${hit._source?.s} ${hit._source?.p} ${hit._source?.o}`,
     score: hit._score ?? 0,
@@ -399,7 +397,7 @@ async function touchLastUsed(client: any, memIds: string[]) {
     const id = fullId.replace(/^mem:/, "");
     return [{ update: { _index: SEMANTIC_INDEX, _id: id } }, { doc: { last_used: now } }];
   });
-  await client.bulk({ body, refresh: "false" });
+  await client.bulk({ body, refresh: false });
 }
 
 // ---- Utilities ----

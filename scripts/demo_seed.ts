@@ -19,7 +19,7 @@ async function seed() {
   await client.index({
     index: `mem-episodic-${new Date().toISOString().slice(0, 10)}`,
     id: event_id,
-    document: {
+    body: {
       tenant_id,
       project_id,
       context_id,
@@ -40,7 +40,7 @@ async function seed() {
   await client.index({
     index: "mem-semantic",
     id: mem_id,
-    document: {
+    body: {
       tenant_id,
       project_id,
       context_id,
@@ -65,7 +65,7 @@ async function seed() {
   await client.index({
     index: "mem-facts",
     id: fact_id,
-    document: {
+    body: {
       tenant_id,
       project_id,
       fact_id,
