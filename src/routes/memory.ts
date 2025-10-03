@@ -2,6 +2,7 @@
 // Memory write/retrieve/promote tools for Memora MCP.
 
 import { v4 as uuidv4 } from "uuid";
+import { debug } from "../services/log";
 
 import { getClient } from "../services/os-client";
 import { embed } from "../services/embedder";
@@ -29,6 +30,7 @@ const EPISODIC_PREFIX = process.env.MEMORA_EPI_PREFIX || "mem-episodic-";
 
 const DEFAULT_BUDGET = Number(process.env.MEMORA_DEFAULT_BUDGET || 12);
 const RERANK_ENABLED = process.env.MEMORA_RERANK_ENABLED === "true";
+const log = debug("memora:memory");
 
 // ---- Public registration ----
 export function registerMemory(server: any) {
@@ -150,6 +152,8 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
 
   const q = req.params as RetrievalQuery;
   const budget = q.budget ?? DEFAULT_BUDGET;
+  const t0 = Date.now();
+  log("retrieve.begin", { budget, scopes: q.filters?.scope ?? ["this_task", "project"] });
 
   // Build filter options shared across searches
   const fopts: FilterOptions = {
@@ -166,13 +170,19 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
   };
 
   // Stage A: Episodic (BM25 / match)
+  const tE = Date.now();
   const episodicHits = await episodicSearch(client, q, fopts);
+  log("stage.episodic", { hits: episodicHits.length, tookMs: Date.now() - tE });
 
   // Stage B: Semantic (k-NN + filters)
+  const tS = Date.now();
   const semanticHits = await semanticSearch(client, q, fopts);
+  log("stage.semantic", { hits: semanticHits.length, tookMs: Date.now() - tS });
 
   // Stage C: Facts (1–2 hop expansion)
+  const tF = Date.now();
   const factHits = await factsSearch(client, q, fopts);
+  log("stage.facts", { hits: factHits.length, tookMs: Date.now() - tF });
 
   // Fuse + optional rerank
   let fused: FusedHit[] = fuseAndDiversify(
@@ -191,17 +201,24 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
       }
     }
   );
+  log("fuse", { episodic: episodicHits.length, semantic: semanticHits.length, facts: factHits.length, fused: fused.length });
 
   if (RERANK_ENABLED) {
+    const r0 = Date.now();
+    const inCount = fused.length;
+    log("rerank.start", { candidates: inCount });
     fused = await crossRerank(q.objective, fused, {
       maxCandidates: getPolicy("rerank.max_candidates", 64),
       budgetMs: getPolicy("rerank.budget_ms", 1000)
     });
     fused = fused.slice(0, budget);
+    log("rerank.end", { tookMs: Date.now() - r0, in: inCount, out: fused.length });
   }
 
   // Touch last_used for semantic docs we return
-  await touchLastUsed(client, fused.filter(h => h.source === "semantic").map(h => h.id));
+  const semanticIds = fused.filter(h => h.source === "semantic").map(h => h.id);
+  await touchLastUsed(client, semanticIds);
+  log("semantic.touch", { count: semanticIds.length });
 
   // Optionally compress/package on the server; often you’ll pack in the client
   const snippets = fused.map(h => ({
@@ -214,6 +231,7 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
     context: active
   }));
 
+  log("retrieve.end", { totalMs: Date.now() - t0, snippets: snippets.length });
   return { snippets };
 }
 
