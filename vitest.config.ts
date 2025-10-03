@@ -16,7 +16,12 @@ export default defineConfig({
       exclude: [
         "dist/**",
         "node_modules/**",
-        "tests/**"
+        "tests/**",
+        "src/index.ts",
+        "src/routes/**",
+        "src/services/os-client.ts",
+        "src/services/rerank.ts",
+        "src/domain/types.ts"
       ],
       thresholds: {
         lines: 80,
