@@ -56,15 +56,19 @@ const FACT_PREFIX = "fact_";
 
 /** SHA-256 hex (browser/node without external deps) */
 export function sha256Hex(input: string | Uint8Array): string {
-  if (typeof (globalThis as any).crypto?.subtle !== "undefined") {
-    // Browser/WebCrypto path (async)
-    throw new Error("sha256Hex called in async WebCrypto context; use sha256HexAsync instead.");
+  // Prefer Node's crypto if available (even when WebCrypto exists in Node 20+)
+  try {
+    const crypto = require("crypto") as typeof import("crypto");
+    const hash = crypto.createHash("sha256");
+    hash.update(typeof input === "string" ? Buffer.from(input, "utf8") : Buffer.from(input));
+    return hash.digest("hex");
+  } catch {
+    // Fallback: environments without Node crypto must use async WebCrypto
+    if (typeof (globalThis as any).crypto?.subtle !== "undefined") {
+      throw new Error("sha256Hex not available synchronously; use sha256HexAsync in this environment.");
+    }
+    throw new Error("No crypto implementation available for sha256Hex.");
   }
-  // Node built-in
-  const crypto = require("crypto") as typeof import("crypto");
-  const hash = crypto.createHash("sha256");
-  hash.update(typeof input === "string" ? Buffer.from(input, "utf8") : Buffer.from(input));
-  return hash.digest("hex");
 }
 
 /** Async WebCrypto version for environments without Node crypto */
