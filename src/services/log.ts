@@ -34,14 +34,12 @@ export function debug(namespace: string): Logger {
   const enabled = patterns.length > 0 && patterns.some((p) => matches(namespace, p));
   if (!enabled) {
     // No-op logger when not enabled to keep hot paths fast
-    // eslint-disable-next-line @typescript-eslint/no-empty-function
     return () => {};
   }
   return (...args: any[]) => {
     const ts = new Date().toISOString();
     // Use stderr to avoid mixing with regular stdout output
     // Keep JSON-like objects intact; rely on util.inspect defaults
-    // eslint-disable-next-line no-console
     console.error(`[${ts}] ${namespace}`, ...args);
   };
 }
