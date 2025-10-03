@@ -17,6 +17,7 @@
 //   - If embeddings are present in hit.meta.embedding, blend with cosine
 
 import { Hit as FusedHit } from "../domain/fusion";
+import { debug } from "./log";
 
 export interface RerankOptions {
   maxCandidates?: number;  // default 64
@@ -28,6 +29,7 @@ const ENDPOINT = process.env.RERANK_ENDPOINT;
 const API_KEY = process.env.RERANK_API_KEY || "";
 const TIMEOUT_MS = numFromEnv("RERANK_TIMEOUT_MS", 1500);
 const MAX_RETRIES = numFromEnv("RERANK_MAX_RETRIES", 2);
+const log = debug("memora:rerank");
 
 export async function crossRerank(
   query: string,
@@ -39,10 +41,12 @@ export async function crossRerank(
   if (candidates.length <= 1) return hits;
 
   const started = Date.now();
+  log("begin", { hits: hits.length, candidates: candidates.length, maxC, budgetMs: opts.budgetMs ?? TIMEOUT_MS, endpoint: Boolean(ENDPOINT) });
 
   // Remote rerank if configured
   if (ENDPOINT) {
     try {
+      const r0 = Date.now();
       const scores = await callRemoteRerank(
         ENDPOINT,
         {
@@ -58,22 +62,27 @@ export async function crossRerank(
         ...c,
         score: isFiniteNumber(scores[i]) ? scores[i] : c.score
       }));
+      log("remote.ok", { tookMs: Date.now() - r0, candidates: candidates.length });
 
       const fusedIds = new Set(reweighted.map(r => r.id));
       const tail = hits.filter(h => !fusedIds.has(h.id));
       reweighted.sort((a, b) => b.score - a.score);
+      log("remote.end", { totalMs: Date.now() - started, out: reweighted.length });
       return [...reweighted, ...tail];
     } catch (err) {
       // Fall through to local fallback if remote fails or times out
+      log("remote.error", { message: (err as Error).message });
       console.warn(`[rerank] remote rerank failed: ${(err as Error).message}. Falling back.`);
     }
   }
 
   // Local fallback rerank (fast & deterministic)
+  const l0 = Date.now();
   const local = localRerank(query, candidates);
   const localIds = new Set(local.map(r => r.id));
   const tail = hits.filter(h => !localIds.has(h.id));
   const budgetLeft = (opts.budgetMs ?? TIMEOUT_MS) - (Date.now() - started);
+  log("local", { tookMs: Date.now() - l0, candidates: candidates.length, budgetLeft });
   // If we already blew the budget, just return; otherwise concatenate.
   return budgetLeft <= 0 ? hits : [...local, ...tail];
 }
