@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 
 const originalEnv = { ...process.env };
 const savedFetch: any = (globalThis as any).fetch;
