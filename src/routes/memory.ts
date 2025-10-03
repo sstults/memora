@@ -4,7 +4,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { debug } from "../services/log.js";
 
-import { getClient } from "../services/os-client.js";
+import { getClient, bulkSafe, indexWithRetries, searchWithRetries, withRetries } from "../services/os-client.js";
 import { embed } from "../services/embedder.js";
 import { scoreSalience, atomicSplit, summarizeIfLong, redact } from "../services/salience.js";
 import { crossRerank } from "../services/rerank.js";
@@ -44,7 +44,6 @@ export function registerMemory(server: any) {
 // =========================
 async function handleWrite(req: any) {
   const ctx = requireContext();
-  const client = getClient();
 
   // Assemble event from params + context
   const nowIso = new Date().toISOString();
@@ -68,7 +67,7 @@ async function handleWrite(req: any) {
 
   // 1) Write episodic (append-only)
   const episodicIndex = dailyEpisodicIndex();
-  await client.index({
+  await indexWithRetries({
     index: episodicIndex,
     id: event.event_id,
     body: flattenEventForIndex(event)
@@ -115,11 +114,7 @@ async function handleWrite(req: any) {
       { index: { _index: SEMANTIC_INDEX, _id: c.mem_id } },
       flattenChunkForIndex(c)
     ]);
-    const resp = await client.bulk({ refresh: true, body });
-    if (resp.body.errors) {
-      const items = (resp.body.items || []).filter((i: any) => (i as any).index?.error);
-      throw new Error(`semantic_upsert errors: ${JSON.stringify(items.slice(0, 3))}`);
-    }
+    await bulkSafe(body, true);
     semantic_upserts = chunks.length;
   }
 
@@ -130,11 +125,7 @@ async function handleWrite(req: any) {
       { index: { _index: FACTS_INDEX, _id: f.fact_id } },
       flattenFactForIndex(f)
     ]);
-    const resp = await client.bulk({ refresh: false, body });
-    if (resp.body.errors) {
-      const items = (resp.body.items || []).filter((i: any) => (i as any).index?.error);
-      throw new Error(`facts_upsert errors: ${JSON.stringify(items.slice(0, 3))}`);
-    }
+    await bulkSafe(body, false);
     facts_upserts = facts.length;
   }
 
@@ -147,7 +138,6 @@ async function handleWrite(req: any) {
  */
 // =========================
 async function handleRetrieve(req: any): Promise<RetrievalResult> {
-  const client = getClient();
   const active = requireContext();
 
   const q = req.params as RetrievalQuery;
@@ -171,17 +161,17 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
 
   // Stage A: Episodic (BM25 / match)
   const tE = Date.now();
-  const episodicHits = await episodicSearch(client, q, fopts);
+  const episodicHits = await episodicSearch(q, fopts);
   log("stage.episodic", { hits: episodicHits.length, tookMs: Date.now() - tE });
 
   // Stage B: Semantic (k-NN + filters)
   const tS = Date.now();
-  const semanticHits = await semanticSearch(client, q, fopts);
+  const semanticHits = await semanticSearch(q, fopts);
   log("stage.semantic", { hits: semanticHits.length, tookMs: Date.now() - tS });
 
   // Stage C: Facts (1–2 hop expansion)
   const tF = Date.now();
-  const factHits = await factsSearch(client, q, fopts);
+  const factHits = await factsSearch(q, fopts);
   log("stage.facts", { hits: factHits.length, tookMs: Date.now() - tF });
 
   // Fuse + optional rerank
@@ -217,7 +207,7 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
 
   // Touch last_used for semantic docs we return
   const semanticIds = fused.filter(h => h.source === "semantic").map(h => h.id);
-  await touchLastUsed(client, semanticIds);
+  await touchLastUsed(semanticIds);
   log("semantic.touch", { count: semanticIds.length });
 
   // Optionally compress/package on the server; often you’ll pack in the client
@@ -243,11 +233,11 @@ async function handlePromote(req: any) {
   const { mem_id, to_scope } = req.params as { mem_id: string; to_scope: Scope };
   if (!mem_id || !to_scope) throw new Error("memory.promote requires mem_id and to_scope.");
 
-  await client.update({
+  await withRetries(() => client.update({
     index: SEMANTIC_INDEX,
     id: mem_id,
     body: { doc: { task_scope: to_scope } }
-  });
+  }));
 
   return { ok: true, mem_id, scope: to_scope };
 }
@@ -310,7 +300,7 @@ function flattenFactForIndex(f: Fact) {
 }
 
 // ---- Episodic BM25
-async function episodicSearch(client: any, q: RetrievalQuery, fopts: FilterOptions): Promise<FusedHit[]> {
+async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<FusedHit[]> {
   const must = [{
     simple_query_string: {
       query: [
@@ -334,7 +324,7 @@ async function episodicSearch(client: any, q: RetrievalQuery, fopts: FilterOptio
     }
   };
 
-  const resp = await client.search({ index: `${EPISODIC_PREFIX}*`, body });
+  const resp = await searchWithRetries({ index: `${EPISODIC_PREFIX}*`, body });
   return (resp.body.hits?.hits || []).map((hit: any, i: number) => ({
     id: `evt:${hit._id}`,
     text: hit._source?.content || "",
@@ -348,7 +338,7 @@ async function episodicSearch(client: any, q: RetrievalQuery, fopts: FilterOptio
 }
 
 // ---- Semantic k-NN
-async function semanticSearch(client: any, q: RetrievalQuery, fopts: FilterOptions): Promise<FusedHit[]> {
+async function semanticSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<FusedHit[]> {
   const qvec = await embed(buildSemanticQueryText(q));
   const size = getPolicy("stages.semantic.top_k", 50);
   const k = getPolicy("stages.semantic.ann_candidates", 200);
@@ -366,7 +356,7 @@ async function semanticSearch(client: any, q: RetrievalQuery, fopts: FilterOptio
     post_filter: postFilter
   };
 
-  const resp = await client.search({ index: SEMANTIC_INDEX, body });
+  const resp = await searchWithRetries({ index: SEMANTIC_INDEX, body });
   return (resp.body.hits?.hits || []).map((hit: any, i: number) => ({
     id: `mem:${hit._id}`,
     text: hit._source?.text || "",
@@ -380,7 +370,7 @@ async function semanticSearch(client: any, q: RetrievalQuery, fopts: FilterOptio
 }
 
 // ---- Facts (1–2 hop expansion; here we just keyword-match s/p/o)
-async function factsSearch(client: any, q: RetrievalQuery, fopts: FilterOptions): Promise<FusedHit[]> {
+async function factsSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<FusedHit[]> {
   const filter = buildBoolFilter(fopts);
   const body = {
     size: getPolicy("stages.facts.top_k", 20),
@@ -396,7 +386,7 @@ async function factsSearch(client: any, q: RetrievalQuery, fopts: FilterOptions)
       }
     }
   };
-  const resp = await client.search({ index: FACTS_INDEX, body });
+  const resp = await searchWithRetries({ index: FACTS_INDEX, body });
   return (resp.body.hits?.hits || []).map((hit: any, i: number) => ({
     id: `fact:${hit._id}`,
     text: `${hit._source?.s} ${hit._source?.p} ${hit._source?.o}`,
@@ -409,14 +399,14 @@ async function factsSearch(client: any, q: RetrievalQuery, fopts: FilterOptions)
   }));
 }
 
-async function touchLastUsed(client: any, memIds: string[]) {
+async function touchLastUsed(memIds: string[]) {
   if (memIds.length === 0) return;
   const now = new Date().toISOString();
   const body = memIds.flatMap((fullId) => {
     const id = fullId.replace(/^mem:/, "");
     return [{ update: { _index: SEMANTIC_INDEX, _id: id } }, { doc: { last_used: now } }];
   });
-  await client.bulk({ body, refresh: false });
+  await bulkSafe(body, false);
 }
 
 // ---- Utilities ----
