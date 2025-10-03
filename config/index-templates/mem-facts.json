@@ -1,0 +1,16 @@
+{
+  "settings":{"index.number_of_shards":1,"index.number_of_replicas":1},
+  "mappings":{
+    "properties":{
+      "tenant_id":{"type":"keyword"},
+      "project_id":{"type":"keyword"},
+      "fact_id":{"type":"keyword"},
+      "s":{"type":"keyword"},
+      "p":{"type":"keyword"},
+      "o":{"type":"keyword"},
+      "version":{"type":"keyword"},
+      "confidence":{"type":"float"},
+      "evidence":{"type":"keyword"}
+    }
+  }
+}

@@ -1,0 +1,60 @@
+# config/memory_policies.yaml
+# Rules for deciding what to store, how long to keep it, and when to promote.
+
+salience:
+  # Threshold for storing a chunk in semantic memory (0.0–1.0).
+  # Events below this are only logged in episodic memory.
+  min_score: 0.6
+
+  # Heuristic keywords that automatically boost salience.
+  boost_keywords:
+    - "error"
+    - "exception"
+    - "decision"
+    - "design"
+    - "api"
+    - "contract"
+    - "fix"
+
+  # Max length of a chunk before summarization (tokens).
+  max_chunk_tokens: 800
+
+ttl:
+  # Default TTL in days for semantic memory entries.
+  semantic_days: 180
+
+  # Renew TTL whenever a memory is retrieved/used.
+  renew_on_use: true
+
+  # TTL for episodic logs (can be rotated or archived).
+  episodic_days: 30
+
+promotion:
+  # Minimum salience score required for a chunk to be promoted
+  # from this_task → project or project → global.
+  min_promote_score: 0.8
+
+  # Require a human confirmation step before global promotion?
+  require_human_for_global: true
+
+scopes:
+  # Allowed memory scopes in this installation.
+  valid_scopes: ["this_task", "project", "global"]
+
+  # Default read scopes if not specified in a query.
+  default_read: ["this_task", "project"]
+
+redaction:
+  # Regex patterns to scrub before storing memory.
+  patterns:
+    - "(?i)api[_-]?key\\s*[:=]\\s*[A-Za-z0-9-_]+"
+    - "(?i)password\\s*[:=]\\s*\\S+"
+    - "(?i)secret\\s*[:=]\\s*\\S+"
+
+compression:
+  # Abstractive compression enabled by default for long snippets.
+  enabled: true
+  # Minimum token count before attempting compression.
+  min_tokens: 200
+  # Preserve anchors like file paths and IDs during compression.
+  preserve_anchors: true

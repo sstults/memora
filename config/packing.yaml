@@ -1,0 +1,35 @@
+# config/packing.yaml
+# Defines how prompts are assembled before sending to the LLM.
+# Items are packed in this order; higher priority sections stay even if truncated.
+
+order:
+  - system         # Core system rules and identity
+  - task_frame     # Current objective, constraints, acceptance tests
+  - tool_state     # Tool configs, env vars, API schemas
+  - retrieved      # Retrieved snippets (semantic/episodic/facts)
+  - recent_turns   # Most recent conversation turns
+
+limits:
+  # Maximum token budget for the full prompt.
+  max_tokens: 16384
+
+  # Hard cap on number of retrieved snippets.
+  max_snippets: 12
+
+  # Token budgets per section (approximate).
+  budgets:
+    system: 1024
+    task_frame: 2048
+    tool_state: 2048
+    retrieved: 8192
+    recent_turns: 2048
+
+compression:
+  # Apply compression if section exceeds its budget.
+  retrieved:
+    enabled: true
+    min_tokens: 200        # Compress only if snippet > 200 tokens
+    preserve_anchors: true # Keep file paths, IDs, error codes intact
+  recent_turns:
+    enabled: true
+    max_turns: 10          # Keep only last 10 turns if over budget

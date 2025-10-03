@@ -1,0 +1,31 @@
+{
+  "settings": {
+    "index.knn": true,
+    "knn.algo_param.ef_search": 128,
+    "index.number_of_shards": 3,
+    "index.number_of_replicas": 1
+  },
+  "mappings": {
+    "properties": {
+      "tenant_id":{"type":"keyword"},
+      "project_id":{"type":"keyword"},
+      "context_id":{"type":"keyword"},
+      "task_scope":{"type":"keyword"},
+      "mem_id":{"type":"keyword"},
+      "title":{"type":"text"},
+      "text":{"type":"text"},
+      "tags":{"type":"keyword"},
+      "salience":{"type":"float"},
+      "novelty":{"type":"float"},
+      "ttl_days":{"type":"integer"},
+      "last_used":{"type":"date","null_value":"1970-01-01"},
+      "api_version":{"type":"keyword"},
+      "env":{"type":"keyword"},
+      "source_event_ids":{"type":"keyword"},
+      "embedding":{
+        "type":"knn_vector","dimension":1024,
+        "method":{"name":"hnsw","space_type":"cosinesimil","engine":"faiss","parameters":{"ef_construction":512,"m":32}}
+      }
+    }
+  }
+}
