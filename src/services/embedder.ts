@@ -104,7 +104,7 @@ function localFallbackEmbedding(text: string, dim: number): number[] {
   const tokens = simpleTokens(text);
 
   // Seed from whole text for variety
-  let seed = murmur3(text);
+  const seed = murmur3(text);
   const rng = mulberry32(seed);
 
   // For each token, compute two hash-derived indices and add sinusoidal bumps.
