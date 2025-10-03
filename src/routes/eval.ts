@@ -2,8 +2,8 @@
 // Per-turn and per-task evaluation logging for Memora MCP.
 
 import { EvalMetrics, Context } from "../domain/types";
-import { requireContext } from "./context";
-import { getClient } from "../services/os-client";
+import { requireContext } from "./context.js";
+import { getClient } from "../services/os-client.js";
 
 const METRICS_INDEX = process.env.MEMORA_METRICS_INDEX || "mem-metrics";
 const EPISODIC_MIRROR = process.env.MEMORA_EVAL_EPISODIC_MIRROR === "true"; // optional

@@ -2,17 +2,17 @@
 // Memory write/retrieve/promote tools for Memora MCP.
 
 import { v4 as uuidv4 } from "uuid";
-import { debug } from "../services/log";
+import { debug } from "../services/log.js";
 
-import { getClient } from "../services/os-client";
-import { embed } from "../services/embedder";
-import { scoreSalience, atomicSplit, summarizeIfLong, redact } from "../services/salience";
-import { crossRerank } from "../services/rerank";
-import { policyNumber, policyArray, retrievalNumber, retrievalArray } from "../services/config";
+import { getClient } from "../services/os-client.js";
+import { embed } from "../services/embedder.js";
+import { scoreSalience, atomicSplit, summarizeIfLong, redact } from "../services/salience.js";
+import { crossRerank } from "../services/rerank.js";
+import { policyNumber, policyArray, retrievalNumber, retrievalArray } from "../services/config.js";
 
-import { requireContext } from "./context";
-import { buildBoolFilter, FilterOptions } from "../domain/filters";
-import { fuseAndDiversify, Hit as FusedHit } from "../domain/fusion";
+import { requireContext } from "./context.js";
+import { buildBoolFilter, FilterOptions } from "../domain/filters.js";
+import { fuseAndDiversify, Hit as FusedHit } from "../domain/fusion.js";
 import {
   Context,
   Event,

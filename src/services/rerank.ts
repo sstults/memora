@@ -16,8 +16,8 @@
 //   - Lexical overlap (Jaccard on token sets) between query & candidate text
 //   - If embeddings are present in hit.meta.embedding, blend with cosine
 
-import { Hit as FusedHit } from "../domain/fusion";
-import { debug } from "./log";
+import { Hit as FusedHit } from "../domain/fusion.js";
+import { debug } from "./log.js";
 
 export interface RerankOptions {
   maxCandidates?: number;  // default 64
