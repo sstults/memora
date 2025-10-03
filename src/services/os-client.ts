@@ -41,7 +41,8 @@ export async function assertHealthy(): Promise<void> {
   const client = getClient();
   try {
     const res = await client.ping();
-    if (!res) throw new Error("OpenSearch ping returned false");
+    const ok = (res as any)?.body ?? res;
+    if (!ok) throw new Error("OpenSearch ping returned false");
   } catch (err: any) {
     const node = process.env.OPENSEARCH_URL || "http://localhost:9200";
     throw new Error(`Unable to reach OpenSearch at ${node}. Is Docker up and indices created? Root cause: ${err?.message || err}`);
@@ -52,7 +53,8 @@ export async function assertHealthy(): Promise<void> {
 export async function ensureIndex(name: string, body?: Record<string, any>): Promise<void> {
   const client = getClient();
   const exists = await client.indices.exists({ index: name });
-  if (!exists) {
+  const existsBody = (exists as any)?.body ?? exists;
+  if (!existsBody) {
     await client.indices.create({ index: name, body });
   }
 }
@@ -64,12 +66,13 @@ export async function putIndexTemplate(name: string, templateBody: Record<string
 }
 
 /** Lightweight bulk helper with basic error surfacing. */
-export async function bulkSafe(body: any[], refresh: "true" | "false" | "wait_for" = "false"): Promise<void> {
+export async function bulkSafe(body: any[], refresh: boolean | "wait_for" = false): Promise<void> {
   if (!Array.isArray(body) || body.length === 0) return;
   const client = getClient();
   const resp = await client.bulk({ body, refresh });
-  if (resp.errors) {
-    const failed = (resp.items || []).filter((i: any) => {
+  const resBody = (resp as any)?.body ?? resp;
+  if (resBody.errors) {
+    const failed = (resBody.items || []).filter((i: any) => {
       const op = Object.keys(i)[0] as keyof typeof i;
       return (i[op] as any)?.error;
     }).slice(0, 3);

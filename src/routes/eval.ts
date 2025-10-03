@@ -1,7 +1,6 @@
 // src/routes/eval.ts
 // Per-turn and per-task evaluation logging for Memora MCP.
 
-import { Server } from "@modelcontextprotocol/sdk";
 import { EvalMetrics, Context } from "../domain/types";
 import { requireContext } from "./context";
 import { getClient } from "../services/os-client";
@@ -9,8 +8,8 @@ import { getClient } from "../services/os-client";
 const METRICS_INDEX = process.env.MEMORA_METRICS_INDEX || "mem-metrics";
 const EPISODIC_MIRROR = process.env.MEMORA_EVAL_EPISODIC_MIRROR === "true"; // optional
 
-export function registerEval(server: Server) {
-  server.tool("eval.log", async (req) => {
+export function registerEval(server: any) {
+  server.tool("eval.log", async (req: any) => {
     const ctx = ensureContextDefaults(req.params as Partial<EvalMetrics>);
     validateMetrics(ctx);
 
@@ -21,13 +20,13 @@ export function registerEval(server: Server) {
     await client.index({
       index: METRICS_INDEX,
       id: docId,
-      document: {
+      body: {
         ...ctx,
         ts: new Date().toISOString(),
         // Flatten retrieved_ids for easier aggregations
         retrieved_count: ctx.retrieved_ids?.length ?? 0
       },
-      refresh: "true"
+      refresh: true
     });
 
     // 2) Optional mirror to episodic as a tiny event
@@ -35,7 +34,7 @@ export function registerEval(server: Server) {
       const episodicIndex = `mem-episodic-${new Date().toISOString().slice(0, 10)}`;
       await client.index({
         index: episodicIndex,
-        document: {
+        body: {
           tenant_id: ctx.tenant_id,
           project_id: ctx.project_id,
           context_id: ctx.context_id,

@@ -1,0 +1,121 @@
+  Overload 2 of 4, '(callback: callbackFn<Record<string, any>, unknown>): TransportRequestCallback', gave the following error.
+    Object literal may only specify known properties, and 'refresh' does not exist in type 'callbackFn<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(119,14): error TS2339: Property 'errors' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(120,27): error TS2339: Property 'items' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(133,38): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(params?: Bulk<({ tenant_id: string; project_id: string; fact_id: string; s: string; p: string; o: string; version: string | null; confidence: number | null; evidence: string[]; } | { index: { _index: string; _id: string; }; })[]> | undefined, options?: TransportRequestOptions | undefined): TransportRequestPromise<...>', gave the following error.
+    Type '"false"' is not assignable to type 'boolean | "wait_for" | undefined'.
+  Overload 2 of 4, '(callback: callbackFn<Record<string, any>, unknown>): TransportRequestCallback', gave the following error.
+    Object literal may only specify known properties, and 'refresh' does not exist in type 'callbackFn<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(134,14): error TS2339: Property 'errors' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(135,27): error TS2339: Property 'items' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(218,12): error TS2322: Type '{ id: string; text: string; score: number; source: Source; why: string | undefined; tags: string[] | undefined; }[]' is not assignable to type 'Hit[]'.
+  Property 'context' is missing in type '{ id: string; text: string; score: number; source: Source; why: string | undefined; tags: string[] | undefined; }' but required in type 'Hit'.
+Error: src/routes/memory.ts(229,16): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(params?: Update<Record<string, any>> | undefined, options?: TransportRequestOptions | undefined): TransportRequestPromise<ApiResponse<Record<string, any>, unknown>>', gave the following error.
+    Object literal may only specify known properties, and 'doc' does not exist in type 'Update<Record<string, any>>'.
+  Overload 2 of 4, '(callback: callbackFn<Record<string, any>, unknown>): TransportRequestCallback', gave the following error.
+    Object literal may only specify known properties, and 'index' does not exist in type 'callbackFn<Record<string, any>, unknown>'.
+Error: src/services/os-client.ts(70,29): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(params?: Bulk<any[]> | undefined, options?: TransportRequestOptions | undefined): TransportRequestPromise<ApiResponse<Record<string, any>, unknown>>', gave the following error.
+    Type '"true" | "false" | "wait_for"' is not assignable to type 'boolean | "wait_for" | undefined'.
+      Type '"true"' is not assignable to type 'boolean | "wait_for" | undefined'.
+  Overload 2 of 4, '(callback: callbackFn<Record<string, any>, unknown>): TransportRequestCallback', gave the following error.
+    Object literal may only specify known properties, and 'body' does not exist in type 'callbackFn<Record<string, any>, unknown>'.
+Error: src/services/os-client.ts(71,12): error TS2339: Property 'errors' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/services/os-client.ts(72,26): error TS2339: Property 'items' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: vitest.config.ts(21,7): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Object literal may only specify known properties, and 'lines' does not exist in type '{ provider: "v8"; } & CoverageV8Options'.
+Error: Process completed with exit code 2.
+3s
+  Overload 2 of 4, '(callback: callbackFn<Record<string, any>, unknown>): TransportRequestCallback', gave the following error.
+    Object literal may only specify known properties, and 'refresh' does not exist in type 'callbackFn<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(119,14): error TS2339: Property 'errors' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(120,27): error TS2339: Property 'items' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(133,38): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(params?: Bulk<({ tenant_id: string; project_id: string; fact_id: string; s: string; p: string; o: string; version: string | null; confidence: number | null; evidence: string[]; } | { index: { _index: string; _id: string; }; })[]> | undefined, options?: TransportRequestOptions | undefined): TransportRequestPromise<...>', gave the following error.
+    Type '"false"' is not assignable to type 'boolean | "wait_for" | undefined'.
+  Overload 2 of 4, '(callback: callbackFn<Record<string, any>, unknown>): TransportRequestCallback', gave the following error.
+    Object literal may only specify known properties, and 'refresh' does not exist in type 'callbackFn<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(134,14): error TS2339: Property 'errors' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(135,27): error TS2339: Property 'items' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(218,12): error TS2322: Type '{ id: string; text: string; score: number; source: Source; why: string | undefined; tags: string[] | undefined; }[]' is not assignable to type 'Hit[]'.
+  Property 'context' is missing in type '{ id: string; text: string; score: number; source: Source; why: string | undefined; tags: string[] | undefined; }' but required in type 'Hit'.
+Error: src/routes/memory.ts(229,16): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(params?: Update<Record<string, any>> | undefined, options?: TransportRequestOptions | undefined): TransportRequestPromise<ApiResponse<Record<string, any>, unknown>>', gave the following error.
+    Object literal may only specify known properties, and 'doc' does not exist in type 'Update<Record<string, any>>'.
+  Overload 2 of 4, '(callback: callbackFn<Record<string, any>, unknown>): TransportRequestCallback', gave the following error.
+    Object literal may only specify known properties, and 'index' does not exist in type 'callbackFn<Record<string, any>, unknown>'.
+Error: src/services/os-client.ts(70,29): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(params?: Bulk<any[]> | undefined, options?: TransportRequestOptions | undefined): TransportRequestPromise<ApiResponse<Record<string, any>, unknown>>', gave the following error.
+    Type '"true" | "false" | "wait_for"' is not assignable to type 'boolean | "wait_for" | undefined'.
+      Type '"true"' is not assignable to type 'boolean | "wait_for" | undefined'.
+  Overload 2 of 4, '(callback: callbackFn<Record<string, any>, unknown>): TransportRequestCallback', gave the following error.
+    Object literal may only specify known properties, and 'body' does not exist in type 'callbackFn<Record<string, any>, unknown>'.
+Error: src/services/os-client.ts(71,12): error TS2339: Property 'errors' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/services/os-client.ts(72,26): error TS2339: Property 'items' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: vitest.config.ts(21,7): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Object literal may only specify known properties, and 'lines' does not exist in type '{ provider: "v8"; } & CoverageV8Options'.
+Error: Process completed with exit code 2.
+  Overload 2 of 4, '(callback: callbackFn<Record<string, any>, unknown>): TransportRequestCallback', gave the following error.
+    Object literal may only specify known properties, and 'refresh' does not exist in type 'callbackFn<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(119,14): error TS2339: Property 'errors' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(120,27): error TS2339: Property 'items' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(133,38): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(params?: Bulk<({ tenant_id: string; project_id: string; fact_id: string; s: string; p: string; o: string; version: string | null; confidence: number | null; evidence: string[]; } | { index: { _index: string; _id: string; }; })[]> | undefined, options?: TransportRequestOptions | undefined): TransportRequestPromise<...>', gave the following error.
+    Type '"false"' is not assignable to type 'boolean | "wait_for" | undefined'.
+  Overload 2 of 4, '(callback: callbackFn<Record<string, any>, unknown>): TransportRequestCallback', gave the following error.
+    Object literal may only specify known properties, and 'refresh' does not exist in type 'callbackFn<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(134,14): error TS2339: Property 'errors' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(135,27): error TS2339: Property 'items' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(218,12): error TS2322: Type '{ id: string; text: string; score: number; source: Source; why: string | undefined; tags: string[] | undefined; }[]' is not assignable to type 'Hit[]'.
+  Property 'context' is missing in type '{ id: string; text: string; score: number; source: Source; why: string | undefined; tags: string[] | undefined; }' but required in type 'Hit'.
+Error: src/routes/memory.ts(229,16): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(params?: Update<Record<string, any>> | undefined, options?: TransportRequestOptions | undefined): TransportRequestPromise<ApiResponse<Record<string, any>, unknown>>', gave the following error.
+    Object literal may only specify known properties, and 'doc' does not exist in type 'Update<Record<string, any>>'.
+  Overload 2 of 4, '(callback: callbackFn<Record<string, any>, unknown>): TransportRequestCallback', gave the following error.
+    Object literal may only specify known properties, and 'index' does not exist in type 'callbackFn<Record<string, any>, unknown>'.
+Error: src/services/os-client.ts(70,29): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(params?: Bulk<any[]> | undefined, options?: TransportRequestOptions | undefined): TransportRequestPromise<ApiResponse<Record<string, any>, unknown>>', gave the following error.
+    Type '"true" | "false" | "wait_for"' is not assignable to type 'boolean | "wait_for" | undefined'.
+      Type '"true"' is not assignable to type 'boolean | "wait_for" | undefined'.
+  Overload 2 of 4, '(callback: callbackFn<Record<string, any>, unknown>): TransportRequestCallback', gave the following error.
+    Object literal may only specify known properties, and 'body' does not exist in type 'callbackFn<Record<string, any>, unknown>'.
+Error: src/services/os-client.ts(71,12): error TS2339: Property 'errors' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/services/os-client.ts(72,26): error TS2339: Property 'items' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: vitest.config.ts(21,7): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Object literal may only specify known properties, and 'lines' does not exist in type '{ provider: "v8"; } & CoverageV8Options'.
+3s
+  Overload 2 of 4, '(callback: callbackFn<Record<string, any>, unknown>): TransportRequestCallback', gave the following error.
+    Object literal may only specify known properties, and 'refresh' does not exist in type 'callbackFn<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(119,14): error TS2339: Property 'errors' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(120,27): error TS2339: Property 'items' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(133,38): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(params?: Bulk<({ tenant_id: string; project_id: string; fact_id: string; s: string; p: string; o: string; version: string | null; confidence: number | null; evidence: string[]; } | { index: { _index: string; _id: string; }; })[]> | undefined, options?: TransportRequestOptions | undefined): TransportRequestPromise<...>', gave the following error.
+    Type '"false"' is not assignable to type 'boolean | "wait_for" | undefined'.
+  Overload 2 of 4, '(callback: callbackFn<Record<string, any>, unknown>): TransportRequestCallback', gave the following error.
+    Object literal may only specify known properties, and 'refresh' does not exist in type 'callbackFn<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(134,14): error TS2339: Property 'errors' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(135,27): error TS2339: Property 'items' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/routes/memory.ts(218,12): error TS2322: Type '{ id: string; text: string; score: number; source: Source; why: string | undefined; tags: string[] | undefined; }[]' is not assignable to type 'Hit[]'.
+  Property 'context' is missing in type '{ id: string; text: string; score: number; source: Source; why: string | undefined; tags: string[] | undefined; }' but required in type 'Hit'.
+Error: src/routes/memory.ts(229,16): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(params?: Update<Record<string, any>> | undefined, options?: TransportRequestOptions | undefined): TransportRequestPromise<ApiResponse<Record<string, any>, unknown>>', gave the following error.
+    Object literal may only specify known properties, and 'doc' does not exist in type 'Update<Record<string, any>>'.
+  Overload 2 of 4, '(callback: callbackFn<Record<string, any>, unknown>): TransportRequestCallback', gave the following error.
+    Object literal may only specify known properties, and 'index' does not exist in type 'callbackFn<Record<string, any>, unknown>'.
+Error: src/services/os-client.ts(70,29): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(params?: Bulk<any[]> | undefined, options?: TransportRequestOptions | undefined): TransportRequestPromise<ApiResponse<Record<string, any>, unknown>>', gave the following error.
+    Type '"true" | "false" | "wait_for"' is not assignable to type 'boolean | "wait_for" | undefined'.
+      Type '"true"' is not assignable to type 'boolean | "wait_for" | undefined'.
+  Overload 2 of 4, '(callback: callbackFn<Record<string, any>, unknown>): TransportRequestCallback', gave the following error.
+    Object literal may only specify known properties, and 'body' does not exist in type 'callbackFn<Record<string, any>, unknown>'.
+Error: src/services/os-client.ts(71,12): error TS2339: Property 'errors' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: src/services/os-client.ts(72,26): error TS2339: Property 'items' does not exist on type 'ApiResponse<Record<string, any>, unknown>'.
+Error: vitest.config.ts(21,7): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Object literal may only specify known properties, and 'lines' does not exist in type '{ provider: "v8"; } & CoverageV8Options'.
+Error: Process completed with exit code 2.

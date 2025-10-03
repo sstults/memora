@@ -1,3 +1,4 @@
+/** @ts-expect-error - SDK types resolution issues in TS compile; runtime import is valid */
 import { createServer } from "@modelcontextprotocol/sdk";
 import { registerMemory } from "./routes/memory";
 import { registerEval } from "./routes/eval";

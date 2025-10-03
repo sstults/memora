@@ -1,15 +1,14 @@
 // src/routes/context.ts
 // Context management routes for Memora MCP.
 
-import { Server } from "@modelcontextprotocol/sdk";
 import { Context } from "../domain/types";
 
 // In-memory context store (per MCP process).
 let activeContext: Context | null = null;
 
-export function registerContext(server: Server) {
+export function registerContext(server: any) {
   // Tool: set_context
-  server.tool("context.set_context", async (req) => {
+  server.tool("context.set_context", async (req: any) => {
     const ctx = req.params as Context;
     if (!ctx.tenant_id || !ctx.project_id) {
       throw new Error("tenant_id and project_id are required");

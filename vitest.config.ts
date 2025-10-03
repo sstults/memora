@@ -18,9 +18,11 @@ export default defineConfig({
         "node_modules/**",
         "tests/**"
       ],
-      lines: 80,
-      functions: 80,
-      branches: 70
+      thresholds: {
+        lines: 80,
+        functions: 80,
+        branches: 70
+      }
     },
     hookTimeout: 20000,
     testTimeout: 10000
