@@ -1,0 +1,21 @@
+{
+  "index_patterns": ["mem-episodic-*"],
+  "template": {
+    "settings": {"index.number_of_shards": 3, "index.number_of_replicas": 1},
+    "mappings": {
+      "properties": {
+        "tenant_id":{"type":"keyword"},
+        "project_id":{"type":"keyword"},
+        "context_id":{"type":"keyword"},
+        "task_id":{"type":"keyword"},
+        "event_id":{"type":"keyword"},
+        "ts":{"type":"date"},
+        "role":{"type":"keyword"},
+        "content":{"type":"text"},
+        "tags":{"type":"keyword"},
+        "artifacts":{"type":"keyword"},
+        "hash":{"type":"keyword"}
+      }
+    }
+  }
+}
