@@ -238,6 +238,60 @@ Notes:
    - memory.promote → on a returned mem:* id
    - eval.log → simple metrics object
 
+## Developer Services (Mocks)
+
+For local development without external services, you can run lightweight mock servers for embeddings and reranking.
+
+- Start mock embedder (HTTP):
+  ```bash
+  npm run dev:embedder
+  # listens on http://localhost:8080
+  ```
+  - API: POST /embed with
+    ```json
+    { "texts": ["hello world", "another"], "dim": 1024 }
+    ```
+    Response:
+    ```json
+    { "vectors": [[...], [...]] }
+    ```
+  - Example:
+    ```bash
+    curl -s http://localhost:8080/embed -H 'Content-Type: application/json' -d '{"texts":["hello world"],"dim":16}' | jq
+    ```
+
+- Start mock reranker (HTTP):
+  ```bash
+  npm run dev:reranker
+  # listens on http://localhost:8081
+  ```
+  - API: POST /rerank with
+    ```json
+    { "query": "your objective", "candidates": [ { "id": "a", "text": "..." } ] }
+    ```
+    Response:
+    ```json
+    { "scores": [0.42, 0.13, ...] }
+    ```
+  - Example:
+    ```bash
+    curl -s http://localhost:8081/rerank -H 'Content-Type: application/json' -d '{"query":"hello world","candidates":[{"id":"a","text":"hello"},{"id":"b","text":"planet"}]}' | jq
+    ```
+
+Environment examples:
+- Embeddings: leave EMBEDDING_ENDPOINT unset to use Memora’s deterministic local fallback, or point it at the mock embedder:
+  ```bash
+  export EMBEDDING_ENDPOINT=http://localhost:8080/embed
+  ```
+- Reranker: enable reranking and point to the mock reranker:
+  ```bash
+  export MEMORA_RERANK_ENABLED=true
+  export RERANK_ENDPOINT=http://localhost:8081/rerank
+  ```
+
+Notes:
+- The mock services are deterministic and meant for development and tests; they do not provide semantic quality but ensure stable shapes and latency.
+
 ## Testing
 
 This repo uses Vitest for unit, integration, and e2e test layers.
