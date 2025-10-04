@@ -85,4 +85,5 @@ jobs:
         env:
           INTEGRATION: "1"
           OPENSEARCH_URL: "http://localhost:9200"
+          DEBUG: "memora:*"
         run: npm run test:integration
