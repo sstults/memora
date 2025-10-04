@@ -76,24 +76,26 @@ export async function assertHealthy(): Promise<void> {
 /** Ensure an index exists; if not, create with provided body (mappings/settings). */
 export async function ensureIndex(name: string, body?: Record<string, any>): Promise<void> {
   const client = getClient();
-  const exists = await client.indices.exists({ index: name });
-  const existsBody = (exists as any)?.body ?? exists;
-  if (!existsBody) {
-    await client.indices.create({ index: name, body });
-  }
+  await withRetries(async () => {
+    const exists = await client.indices.exists({ index: name });
+    const existsBody = (exists as any)?.body ?? exists;
+    if (!existsBody) {
+      await client.indices.create({ index: name, body });
+    }
+  }, Number(process.env.MEMORA_OS_MAX_RETRIES ?? 3));
 }
 
 /** Apply (or overwrite) an index template by name. */
 export async function putIndexTemplate(name: string, templateBody: Record<string, any>): Promise<void> {
   const client = getClient();
-  await client.indices.putIndexTemplate({ name, body: templateBody });
+  await withRetries(() => client.indices.putIndexTemplate({ name, body: templateBody }));
 }
 
 /** Lightweight bulk helper with basic error surfacing. */
 export async function bulkSafe(body: any[], refresh: boolean | "wait_for" = false): Promise<void> {
   if (!Array.isArray(body) || body.length === 0) return;
   const client = getClient();
-  const resp = await client.bulk({ body, refresh });
+  const resp = await withRetries(() => client.bulk({ body, refresh } as any));
   const resBody = (resp as any)?.body ?? resp;
   if (resBody.errors) {
     const failed = (resBody.items || []).filter((i: any) => {
