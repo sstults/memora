@@ -70,7 +70,8 @@ async function handleWrite(req: any) {
   await indexWithRetries({
     index: episodicIndex,
     id: event.event_id,
-    body: flattenEventForIndex(event)
+    body: flattenEventForIndex(event),
+    refresh: true
   });
 
   // 2) Salience → semantic chunks + facts
@@ -125,7 +126,7 @@ async function handleWrite(req: any) {
       { index: { _index: FACTS_INDEX, _id: f.fact_id } },
       flattenFactForIndex(f)
     ]);
-    await bulkSafe(body, false);
+    await bulkSafe(body, true);
     facts_upserts = facts.length;
   }
 
@@ -303,16 +304,23 @@ function flattenFactForIndex(f: Fact) {
 async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<FusedHit[]> {
   const must = [{
     simple_query_string: {
-      query: [
-        q.objective,
-        (q.task_id ? `"${q.task_id}"` : ""),
-      ].filter(Boolean).join(" "),
+      query: q.objective,
       fields: ["content^3", "tags", "artifacts"],
-      default_operator: "and"
+      default_operator: "or"
     }
   }];
 
-  const filter = buildBoolFilter(fopts);
+  // Episodic docs do not include env/api_version or scope; tailor filters accordingly
+  const eopts: FilterOptions = {
+    tenant_id: fopts.tenant_id,
+    project_id: fopts.project_id,
+    context_id: fopts.context_id,
+    task_id: fopts.task_id,
+    tags: fopts.tags,
+    exclude_tags: fopts.exclude_tags,
+    recent_days: fopts.recent_days
+  };
+  const filter = buildBoolFilter(eopts);
   const body = {
     size: getPolicy("stages.episodic.top_k", 25),
     query: {
@@ -341,23 +349,76 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
 async function semanticSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<FusedHit[]> {
   const qvec = await embed(buildSemanticQueryText(q));
   const size = getPolicy("stages.semantic.top_k", 50);
-  const k = getPolicy("stages.semantic.ann_candidates", 200);
 
-  const postFilter = buildBoolFilter(fopts);
+  const sfopts: FilterOptions = {
+    tenant_id: fopts.tenant_id,
+    project_id: fopts.project_id,
+    context_id: fopts.context_id,
+    // semantic docs do not persist task_id; filter by scope/context instead
+    scopes: fopts.scopes,
+    tags: fopts.tags,
+    api_version: fopts.api_version,
+    env: fopts.env,
+    exclude_tags: fopts.exclude_tags
+  };
+  const bf = buildBoolFilter(sfopts);
+  const filterClauses: any[] = [];
+  for (const qx of bf.bool.must) filterClauses.push(qx);
+  for (const qx of bf.bool.filter) filterClauses.push(qx);
+  if (bf.bool.must_not && bf.bool.must_not.length) {
+    filterClauses.push({ bool: { must_not: bf.bool.must_not } });
+  }
+
+  // Use widely-supported script_score with knn_score to avoid version-specific knn syntax issues
+  const innerBool: any = {
+    filter: bf.bool.filter || []
+  };
+  if (bf.bool.must && bf.bool.must.length) innerBool.must = bf.bool.must;
+  if (bf.bool.must_not && bf.bool.must_not.length) innerBool.must_not = bf.bool.must_not;
 
   const body = {
     size,
-    knn: {
-      field: "embedding",
-      query_vector: qvec,
-      k,
-      num_candidates: k
-    },
-    post_filter: postFilter
+    query: {
+      script_score: {
+        query: { bool: innerBool },
+        script: {
+          source: "knn_score",
+          lang: "knn",
+          params: {
+            field: "embedding",
+            query_value: qvec,
+            space_type: "cosinesimil"
+          }
+        }
+      }
+    }
   };
-
   const resp = await searchWithRetries({ index: SEMANTIC_INDEX, body });
-  return (resp.body.hits?.hits || []).map((hit: any, i: number) => ({
+  let hits: any[] = (resp.body.hits?.hits || []);
+
+  // Fallback: if ANN returns nothing (plugin/syntax variance), use BM25 over text/title with same filters
+  if (hits.length === 0) {
+    const fallbackBody = {
+      size,
+      query: {
+        bool: {
+          must: [{
+            simple_query_string: {
+              query: q.objective,
+              fields: ["text^2", "title", "tags"],
+              default_operator: "or"
+            }
+          }],
+          filter: bf.bool.filter,
+          must_not: bf.bool.must_not
+        }
+      }
+    };
+    const resp2 = await searchWithRetries({ index: SEMANTIC_INDEX, body: fallbackBody as any });
+    hits = (resp2.body.hits?.hits || []);
+  }
+
+  return hits.map((hit: any, i: number) => ({
     id: `mem:${hit._id}`,
     text: hit._source?.text || "",
     score: hit._score ?? 0,
@@ -371,7 +432,15 @@ async function semanticSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
 
 // ---- Facts (1–2 hop expansion; here we just keyword-match s/p/o)
 async function factsSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<FusedHit[]> {
-  const filter = buildBoolFilter(fopts);
+  // Facts docs only store tenant_id and project_id; avoid filtering on context/task/env/api_version
+  const ff = buildBoolFilter({
+    tenant_id: fopts.tenant_id,
+    project_id: fopts.project_id
+  } as any);
+  const filterClauses: any[] = [];
+  for (const qx of ff.bool.must) filterClauses.push(qx);
+  for (const qx of ff.bool.filter) filterClauses.push(qx);
+
   const body = {
     size: getPolicy("stages.facts.top_k", 20),
     query: {
@@ -382,7 +451,7 @@ async function factsSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<Fus
             fields: ["s^2", "p", "o"]
           }
         }],
-        filter: filter
+        filter: filterClauses
       }
     }
   };
