@@ -39,6 +39,7 @@ describe.runIf(run)("memory integration (OpenSearch required)", () => {
 
   const tools = new Map<string, ToolFn>();
   const server = { tool: (name: string, fn: ToolFn) => tools.set(name, fn) };
+  const client = getClient();
 
   beforeAll(async () => {
     // 1) Health gate
@@ -72,7 +73,7 @@ describe.runIf(run)("memory integration (OpenSearch required)", () => {
       params: {
         tenant_id: "memora",
         project_id: "integration",
-        context_id: "ctx-1",
+        context_id: "ctx-it-b",
         task_id: "task-1",
         env: "test",
         api_version: "3.1"
@@ -86,13 +87,13 @@ describe.runIf(run)("memory integration (OpenSearch required)", () => {
 
     // Content includes a trivial fact pattern: "<subj> <p> <obj>"
     const content =
-      "Integration check: FeatureA introduced_in v1_0 and requires EngineX. This API design decision outlines the contract and describes a fix for reliability.\nAdditional details about usage, design, and API contract.";
+      "Integration check IT-B: FeatureA introduced_in v1_0 and requires EngineX. FeatureA v1_0 design decision: contract, reliability fix, engine tuning. FeatureA introduced_in v1_0 repeated for emphasis. UniqueMarker_ITB_A.";
 
     const wres = await write({
       params: {
         role: "tool",
         content,
-        tags: ["test", "integration"]
+        tags: ["test", "integration", "it-b"]
       }
     });
 
@@ -101,12 +102,16 @@ describe.runIf(run)("memory integration (OpenSearch required)", () => {
     // At least one semantic upsert expected from salience score
     expect(wres?.semantic_upserts).toBeGreaterThanOrEqual(1);
 
+    // Explicitly refresh semantic index to ensure k-NN sees newly upserted chunks
+    await client.indices.refresh({ index: SEMANTIC_INDEX });
+
     const rres = await retrieve({
       params: {
         objective: "FeatureA introduced_in v1_0",
         budget: 8,
         filters: {
-          scope: ["this_task", "project"]
+          scope: ["this_task", "project"],
+          tags: ["it-b"]
         }
       }
     });
@@ -125,25 +130,27 @@ describe.runIf(run)("memory integration (OpenSearch required)", () => {
 
     // Write another event
     const content =
-      "Integration promote test: FeatureB introduced_in v2_0 and uses EngineY. API design decision and contract discussed to fix issues.";
+      "Integration promote IT-B: FeatureB introduced_in v2_0 and uses EngineY. FeatureB v2_0 design decision, contract, reliability improvements. FeatureB introduced_in v2_0 emphasized. UniqueMarker_ITB_B.";
     const wres = await write({
-      params: { role: "tool", content, tags: ["test", "integration", "promote"] }
+      params: { role: "tool", content, tags: ["test", "integration", "promote", "it-b"] }
     });
     expect(wres?.ok).toBe(true);
+
+    // Explicitly refresh semantic index before retrieval
+    await client.indices.refresh({ index: SEMANTIC_INDEX });
 
     // Retrieve to get semantic mems (which also triggers last_used touch)
     const rres = await retrieve({
       params: {
         objective: "FeatureB introduced_in v2_0",
         budget: 8,
-        filters: { scope: ["this_task", "project"] }
+        filters: { scope: ["this_task", "project"], tags: ["it-b"] }
       }
     });
     const semantic = rres.snippets.filter((s: any) => s.source === "semantic");
     expect(semantic.length).toBeGreaterThan(0);
 
     // Verify last_used was touched
-    const client = getClient();
     await client.indices.refresh({ index: SEMANTIC_INDEX });
     const memId = String(semantic[0].id).replace(/^mem:/, "");
     const doc = await client.get({ index: SEMANTIC_INDEX, id: memId });
@@ -172,17 +179,20 @@ describe.runIf(run)("memory integration (OpenSearch required)", () => {
 
     // Write and retrieve to produce snippet ids
     const content =
-      "Eval logging check: FeatureC requires EngineZ. API design decision and contract notes for retrieval; exception handling and fix details included.";
+      "Eval logging IT-B: FeatureC requires EngineZ. FeatureC design decision, API contract, retrieval notes. FeatureC requires EngineZ emphasized. UniqueMarker_ITB_C.";
     const wres = await write({
-      params: { role: "tool", content, tags: ["test", "integration", "eval"] }
+      params: { role: "tool", content, tags: ["test", "integration", "eval", "it-b"] }
     });
     expect(wres?.ok).toBe(true);
+
+    // Explicitly refresh semantic index before retrieval
+    await client.indices.refresh({ index: SEMANTIC_INDEX });
 
     const rres = await retrieve({
       params: {
         objective: "FeatureC requires EngineZ",
         budget: 6,
-        filters: { scope: ["this_task", "project"] }
+        filters: { scope: ["this_task", "project"], tags: ["it-b"] }
       }
     });
     expect(Array.isArray(rres?.snippets)).toBe(true);
@@ -202,7 +212,6 @@ describe.runIf(run)("memory integration (OpenSearch required)", () => {
     expect(typeof eres?.id).toBe("string");
 
     // Verify document persisted with retrieved_count
-    const client = getClient();
     const doc = await client.get({ index: METRICS_INDEX, id: eres.id });
     const src = ((doc as any).body ?? doc)?._source ?? {};
     expect(src.retrieved_count).toBe(ids.length);
