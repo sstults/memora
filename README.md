@@ -123,6 +123,24 @@ Manual alternative (legacy):
 
 ---
  
+## Feature flags and defaults
+
+- Embeddings
+  - EMBEDDING_ENDPOINT: optional. If unset, Memora uses a deterministic local hash-based embedder suitable for tests and development. Set an HTTP endpoint returning {vectors: number[][]} for production.
+- Reranking
+  - MEMORA_RERANK_ENABLED: default false. When true, Memora performs a rerank step after fusion.
+  - RERANK_ENDPOINT: optional HTTP service for rerank. If provided, Memora POSTs {query, candidates} and expects {scores}. If not provided, a lightweight local fallback reranker is used. When MEMORA_RERANK_ENABLED is false, no rerank step runs.
+- Eval mirroring
+  - MEMORA_EVAL_EPISODIC_MIRROR: default false. When true, eval.log entries are mirrored to the episodic log as small events for easy timeline inspection.
+
+Example:
+```bash
+# Optional features
+export MEMORA_RERANK_ENABLED=true
+export RERANK_ENDPOINT=http://localhost:8081/rerank
+export MEMORA_EVAL_EPISODIC_MIRROR=true
+```
+
 ## Minimal API
 
 Tools and shapes (request params in MCP tool calls):
