@@ -1,6 +1,7 @@
 // scripts/demo_seed.ts
 // Quick seed script for local development.
 // Run with: npx ts-node scripts/demo_seed.ts
+// Or via npm: npm run seed:demo
 //
 // Behavior:
 // - Waits for OpenSearch health (yellow by default) before seeding.
