@@ -32,6 +32,13 @@ const DEFAULT_BUDGET = Number(process.env.MEMORA_DEFAULT_BUDGET || 12);
 const RERANK_ENABLED = process.env.MEMORA_RERANK_ENABLED === "true";
 const log = debug("memora:memory");
 
+// Idempotency and backpressure knobs
+const IDEMP_INDEX = process.env.MEMORA_IDEMP_INDEX || "mem-idempotency";
+const MAX_CHUNKS = Number(process.env.MEMORA_WRITE_MAX_CHUNKS || 64);
+
+// In-process cache as a fast path for idempotency (persists per process)
+const idempotencyCache = new Map<string, { result: { ok: boolean; event_id: string; semantic_upserts: number; facts_upserts: number }; ts: string }>();
+
 // ---- Public registration ----
 export function registerMemory(server: any) {
   server.tool("memory.write", handleWrite);
@@ -44,6 +51,39 @@ export function registerMemory(server: any) {
 // =========================
 async function handleWrite(req: any) {
   const ctx = requireContext();
+
+  // Idempotency fast-path: if idempotency_key (or hash) provided, check cache/persistence
+  const idemRaw = req.params?.idempotency_key || req.params?.hash;
+  const idemKey = idemRaw ? makeIdemKey({
+    tenant_id: ctx.tenant_id,
+    project_id: ctx.project_id,
+    context_id: (ctx.context_id ?? ""),
+    task_id: (req.params?.task_id ?? ctx.task_id ?? "")
+  }, String(idemRaw)) : null;
+
+  if (idemKey) {
+    const cached = idempotencyCache.get(idemKey);
+    if (cached) {
+      log("idempotency.cache_hit", { key: idemKey });
+      return cached.result;
+    }
+    // Optional persistent check (best-effort); if not found, proceed
+    try {
+      const resp = await searchWithRetries({
+        index: IDEMP_INDEX,
+        body: { size: 1, query: { ids: { values: [idemKey] } } }
+      });
+      const hit = resp?.body?.hits?.hits?.[0];
+      if (hit && hit._source?.result) {
+        log("idempotency.store_hit", { key: idemKey });
+        const result = hit._source.result;
+        idempotencyCache.set(idemKey, { result, ts: new Date().toISOString() });
+        return result;
+      }
+    } catch (e) {
+      log("idempotency.lookup_error", { err: String(e) });
+    }
+  }
 
   // Assemble event from params + context
   const nowIso = new Date().toISOString();
@@ -87,6 +127,11 @@ async function handleWrite(req: any) {
     const extractedFacts = extractFacts(a, event.context);
     facts.push(...extractedFacts);
 
+    // Backpressure: cap number of semantic chunks to avoid unbounded embeds
+    if (chunks.length >= MAX_CHUNKS) {
+      log("write.chunk_cap_reached", { cap: MAX_CHUNKS });
+      break;
+    }
     // (b) semantic chunk
     const text = summarizeIfLong(a, getPolicy("salience.max_chunk_tokens", 800));
     const vec = await embed(text); // local or remote embedder
@@ -130,7 +175,32 @@ async function handleWrite(req: any) {
     facts_upserts = facts.length;
   }
 
-  return { ok: true, event_id: event.event_id, semantic_upserts, facts_upserts };
+  const result = { ok: true, event_id: event.event_id, semantic_upserts, facts_upserts };
+
+  // Persist idempotency record (best-effort) and cache
+  if (idemKey) {
+    try {
+      await indexWithRetries({
+        index: IDEMP_INDEX,
+        id: idemKey,
+        body: {
+          idempotency_key: idemRaw,
+          tenant_id: event.context.tenant_id,
+          project_id: event.context.project_id,
+          context_id: event.context.context_id,
+          task_id: event.context.task_id,
+          ts: nowIso,
+          result
+        },
+        refresh: false
+      });
+    } catch (e) {
+      log("idempotency.store_error", { err: String(e) });
+    }
+    idempotencyCache.set(idemKey, { result, ts: nowIso });
+  }
+
+  return result;
 }
 
 // =========================
@@ -478,8 +548,12 @@ async function touchLastUsed(memIds: string[]) {
   await bulkSafe(body, false);
 }
 
-// ---- Utilities ----
-function buildSemanticQueryText(q: RetrievalQuery): string {
+ // ---- Utilities ----
+ function makeIdemKey(ctxIds: { tenant_id: string; project_id: string; context_id: string; task_id: string }, key: string): string {
+   const safe = (s: string) => String(s).replace(/[^A-Za-z0-9:_-]/g, "_");
+   return `${safe(ctxIds.tenant_id)}:${safe(ctxIds.project_id)}:${safe(ctxIds.context_id)}:${safe(ctxIds.task_id)}:${safe(key)}`;
+ }
+ function buildSemanticQueryText(q: RetrievalQuery): string {
   const bits = [
     q.objective,
     q.task_id ? `task:${q.task_id}` : "",

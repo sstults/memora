@@ -97,6 +97,7 @@ Memora can automatically gate on OpenSearch cluster health and bootstrap templat
   - MEMORA_SEMANTIC_INDEX (default: mem-semantic)
   - MEMORA_FACTS_INDEX (default: mem-facts)
   - MEMORA_EPI_PREFIX (default: mem-episodic-)
+  - MEMORA_IDEMP_INDEX (default: mem-idempotency) for idempotent write records
   - MEMORA_BOOTSTRAP_CREATE_TODAY: if true, also ensures today's episodic index (prefix + YYYY-MM-DD).
 
 - Retries/Timeouts:
@@ -150,7 +151,7 @@ Tools and shapes (request params in MCP tool calls):
 - context.get_context
   - Response: { ok: true, context } or { ok: false, message }
 - memory.write
-  - Request: { role, content, tags?, artifacts?, task_id? }
+  - Request: { role, content, tags?, artifacts?, task_id?, idempotency_key?, hash? }
   - Response: { ok: true, event_id, semantic_upserts, facts_upserts }
 - memory.retrieve
   - Request: {
