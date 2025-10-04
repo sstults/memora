@@ -19,6 +19,8 @@
     "test:integration": "npm run typecheck && vitest run --dir tests/integration",
     "test:e2e": "npm run typecheck && vitest run --dir tests/e2e",
     "coverage": "vitest run --coverage",
+    "dev:embedder": "node --import ./scripts/register-ts-node.mjs scripts/dev/embedder_server.ts",
+    "dev:reranker": "node --import ./scripts/register-ts-node.mjs scripts/dev/reranker_server.ts",
     "prepare": "husky"
   },
   "dependencies": {
