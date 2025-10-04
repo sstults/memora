@@ -34,7 +34,7 @@ It is designed to support **long-running tasks, multi-project contexts, and coll
 
 ### Install
 ```bash
-git clone https://github.com/your-org/memora.git
+git clone https://github.com/sstults/memora.git
 cd memora
 npm install
 ```
@@ -356,3 +356,29 @@ Integration tests in CI:
   - `tests/unit/**`
   - `tests/integration/**` (guarded by `INTEGRATION=1`)
   - `tests/e2e/**` (guarded by `E2E=1`)
+
+## Release (GitHub-only)
+
+This repository uses a tag-driven GitHub Actions workflow located at `.github/workflows/release.yml`. It runs automatically when you push a tag matching `v*.*.*` (for example, `v0.1.0`). The workflow:
+- Installs dependencies
+- Lints
+- Builds
+- Runs unit tests
+- Packs an npm tarball (`memora-*.tgz`) for convenience
+- Creates a GitHub Release with auto-generated notes and attaches the tarball
+
+Release steps:
+1) Ensure main is green (CI passing)
+2) Bump version and create a tag (SemVer):
+   ```bash
+   npm version patch   # or: minor | major
+   ```
+3) Push commit and tag:
+   ```bash
+   git push --follow-tags
+   ```
+4) The Release workflow will run and publish the GitHub Release. You can edit release notes in the GitHub UI if desired.
+
+Notes:
+- Integration tests are covered in `.github/workflows/ci.yml` (separate job). Ensure CI is healthy before tagging.
+- No npm publish is performed; artifacts are attached to the GitHub Release only.

@@ -138,6 +138,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  // eslint-disable-next-line no-console
   console.log(`[dev-embedder] listening on http://localhost:${PORT}`);
 });
