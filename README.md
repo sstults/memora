@@ -76,7 +76,60 @@ npm i && npm run dev
 ```
 
 ---
+ 
+## Minimal API
 
+Tools and shapes (request params in MCP tool calls):
+- context.set_context
+  - Request: { tenant_id, project_id, context_id, task_id, env, api_version }
+  - Response: { ok: true, context } (or error on missing tenant_id/project_id)
+- context.get_context
+  - Response: { ok: true, context } or { ok: false, message }
+- memory.write
+  - Request: { role, content, tags?, artifacts?, task_id? }
+  - Response: { ok: true, event_id, semantic_upserts, facts_upserts }
+- memory.retrieve
+  - Request: {
+      objective,
+      budget?,
+      filters?: { scope: string[], tags?, api_version?, env? },
+      task_id?, context_id?
+    }
+  - Response: { snippets: [{ id, text, score, source, tags, why, context }] }
+- memory.promote
+  - Request: { mem_id, to_scope }
+  - Response: { ok: true, mem_id, scope }
+- eval.log
+  - Request: { step, success, tokens_in, latency_ms, cost_usd?, retrieved_ids?, p_at_k?, groundedness? }
+  - Response: { ok: true, id }
+
+Examples:
+- Set context
+  ```json
+  {
+    "params": {
+      "tenant_id": "acme",
+      "project_id": "memora",
+      "context_id": "ctx-1",
+      "task_id": "task-42",
+      "env": "prod",
+      "api_version": "3.1"
+    }
+  }
+  ```
+- Retrieve
+  ```json
+  {
+    "params": {
+      "objective": "FeatureA introduced_in v1_0",
+      "budget": 8,
+      "filters": { "scope": ["this_task", "project"] }
+    }
+  }
+  ```
+
+---
+ 
 ## Testing
 
 This repo uses Vitest for unit, integration, and e2e test layers.
@@ -117,8 +170,8 @@ This repo uses Vitest for unit, integration, and e2e test layers.
 - Integration tests: require OpenSearch
   - Validates `memory.write`, `memory.retrieve`, and `memory.promote` shapes and side-effects
   - Uses local OpenSearch via Docker Compose; indices created by `scripts/create_indices.sh`
-- E2E tests (MCP tool surface): process-level tests invoking registered tools end-to-end
-  - Skeleton provided; can be enabled with `E2E=1` when server launch harness is added
+- E2E tests (MCP tool surface): in-process tests invoking registered tools; OpenSearch is mocked
+  - Basic suite provided at `tests/e2e/mcp.e2e.spec.ts`; enable with `E2E=1`
 
 ### Environment for tests
 - Unit tests do not require external services. `embedder` uses deterministic local fallback when `EMBEDDING_ENDPOINT` is unset.
@@ -130,10 +183,8 @@ This repo uses Vitest for unit, integration, and e2e test layers.
 GitHub Actions workflow at `.github/workflows/ci.yml` runs:
 - Install, lint, build, unit tests, coverage summary
 
-To run integration tests in CI, add a follow-up job that:
-- Starts OpenSearch service (or uses Docker Compose)
-- Waits for health, applies index templates
-- Runs `INTEGRATION=1 npm run test:integration`
+Integration tests in CI:
+- The Integration Tests job in `.github/workflows/ci.yml` starts OpenSearch, waits for health, applies index templates, and runs `INTEGRATION=1 npm run test:integration`.
 
 ### Developer Notes
 - Redaction patterns live in `config/memory_policies.yaml`
