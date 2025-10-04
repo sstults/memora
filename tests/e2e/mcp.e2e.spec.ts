@@ -129,6 +129,51 @@ describe.runIf(process.env.E2E === "1")("MCP E2E (in-process tool surface, OS mo
     expect(typeof wres?.event_id).toBe("string");
   });
 
+  it("memory.write is idempotent when idempotency_key is provided", async () => {
+    const write = tools.get("memory.write")!;
+    const key = "idem-key-e2e-1";
+
+    const bulksBefore = h.bulks.length;
+    const ixBefore = h.indexWithRetries.mock.calls.length;
+
+    const first = await write({
+      params: {
+        role: "tool",
+        content: "Idempotent write content A",
+        tags: ["test", "e2e", "idem"],
+        idempotency_key: key
+      }
+    });
+
+    const bulksAfterFirst = h.bulks.length;
+    const ixAfterFirst = h.indexWithRetries.mock.calls.length;
+
+    const second = await write({
+      params: {
+        role: "tool",
+        content: "Idempotent write content B (should be ignored)",
+        tags: ["test", "e2e", "idem"],
+        idempotency_key: key
+      }
+    });
+
+    const bulksAfterSecond = h.bulks.length;
+    const ixAfterSecond = h.indexWithRetries.mock.calls.length;
+
+    expect(first?.ok).toBe(true);
+    expect(second?.ok).toBe(true);
+    expect(second.event_id).toBe(first.event_id);
+
+    // Ensure no additional OS writes happened on the second, duplicate call
+    expect(bulksAfterSecond).toBe(bulksAfterFirst);
+    expect(ixAfterSecond).toBe(ixAfterFirst);
+
+    // Sanity: bulks may or may not have been produced depending on salience thresholds,
+    // but if they were produced on first call, bulksAfterFirst should be > bulksBefore.
+    expect(bulksAfterFirst).toBeGreaterThanOrEqual(bulksBefore);
+    expect(ixAfterFirst).toBeGreaterThan(ixBefore);
+  });
+
   it("memory.retrieve returns fused snippets (from mocked searches) and touches last_used", async () => {
     const retrieve = tools.get("memory.retrieve")!;
     const rres = await retrieve({
