@@ -48,5 +48,13 @@
   "engines": {
     "node": ">=20.0.0"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sstults/memora.git"
+  },
+  "homepage": "https://github.com/sstults/memora#readme",
+  "bugs": {
+    "url": "https://github.com/sstults/memora/issues"
+  }
 }
