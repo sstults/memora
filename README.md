@@ -195,6 +195,49 @@ Examples:
 
 ---
  
+## Cline Integration
+
+Add Memora as an MCP server in Cline and run it with your local OpenSearch.
+
+mcpServers configuration (add this to your Cline MCP servers configuration):
+```json
+{
+  "mcpServers": {
+    "memora": {
+      "command": "npm",
+      "args": ["run", "mcp"],
+      "cwd": "/absolute/path/to/your/memora/repo",
+      "env": {
+        "OPENSEARCH_URL": "http://localhost:9200",
+        "MEMORA_BOOTSTRAP_OS": "1"
+      }
+    }
+  }
+}
+```
+
+Notes:
+- Set OPENSEARCH_URL to your OpenSearch endpoint. For local Docker: http://localhost:9200
+- MEMORA_BOOTSTRAP_OS=1 will idempotently apply index templates and ensure base indices on first run; remove after bootstrap if desired.
+- For deterministic local embeddings in development, leave EMBEDDING_ENDPOINT unset. To use a remote service, set EMBEDDING_ENDPOINT in env.
+- The npm script "mcp" starts only the MCP server entrypoint (no seeding or side effects).
+
+60-second first-run checklist:
+1) Start OpenSearch
+   - docker compose -f docker/docker-compose.yml up -d
+2) Configure environment
+   - cp .env.example .env
+   - Set OPENSEARCH_URL (and optionally EMBEDDING_ENDPOINT)
+   - Optionally export MEMORA_BOOTSTRAP_OS=1 for first run
+3) Add the MCP server in Cline using the config above (ensure "cwd" points to this repo)
+4) Start the server in Cline
+5) Quick smoke (via Cline tools):
+   - context.set_context → expect { ok: true }
+   - memory.write → small log line
+   - memory.retrieve → expect at least one snippet
+   - memory.promote → on a returned mem:* id
+   - eval.log → simple metrics object
+
 ## Testing
 
 This repo uses Vitest for unit, integration, and e2e test layers.
