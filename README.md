@@ -94,6 +94,10 @@ Memora can automatically gate on OpenSearch cluster health and bootstrap templat
   - MEMORA_EPI_PREFIX (default: mem-episodic-)
   - MEMORA_BOOTSTRAP_CREATE_TODAY: if true, also ensures today's episodic index (prefix + YYYY-MM-DD).
 
+- Retries/Timeouts:
+  - MEMORA_OS_MAX_RETRIES: maximum retry attempts for OpenSearch operations (default: 3).
+  - MEMORA_OS_REQUEST_TIMEOUT_MS: request timeout in milliseconds for OpenSearch client (default: 10000).
+
 Example:
 ```bash
 export OPENSEARCH_URL=http://localhost:9200
