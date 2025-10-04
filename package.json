@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --import ./scripts/register-ts-node.mjs src/index.ts",
+    "mcp": "node --import ./scripts/register-ts-node.mjs src/index.ts",
     "seed:demo": "node --import ./scripts/register-ts-node.mjs scripts/demo_seed.ts",
     "build": "tsc",
     "start": "node --experimental-specifier-resolution=node dist/src/index.js",
