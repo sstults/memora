@@ -69,7 +69,12 @@ docker compose -f docker/docker-compose.yml up -d
 ./scripts/create_indices.sh
 ```
 
-3) Start MCP
+3) Seed demo data (optional)
+```bash
+npm run seed:demo
+```
+
+4) Start MCP
 ```bash
 cp .env.example .env  # set OPENSEARCH_URL, EMBEDDING_ENDPOINT
 npm i && npm run dev
