@@ -5,7 +5,7 @@
   "main": "dist/src/index.js",
   "type": "module",
   "scripts": {
-    "dev": "node --loader ts-node/esm src/index.ts",
+    "dev": "node --import ts-node/register/esm src/index.ts",
     "build": "tsc",
     "start": "node --experimental-specifier-resolution=node dist/src/index.js",
     "lint": "eslint . --ext .ts",
