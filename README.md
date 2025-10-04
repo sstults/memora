@@ -75,6 +75,43 @@ cp .env.example .env  # set OPENSEARCH_URL, EMBEDDING_ENDPOINT
 npm i && npm run dev
 ```
 
+### OpenSearch bootstrap and health gating
+
+Memora can automatically gate on OpenSearch cluster health and bootstrap templates/indices at startup.
+
+- Health gating:
+  - MEMORA_OS_MIN_HEALTH: "yellow" | "green" (default: yellow). Uses cluster.health wait_for_status.
+  - MEMORA_OS_HEALTH_TIMEOUT_MS: number (default: 30000).
+- Bootstrap (env-gated):
+  - MEMORA_BOOTSTRAP_OS: set to 1 or true to enable bootstrap at startup.
+  - Applies episodic index template and ensures base indices exist idempotently.
+- Vector dim validation:
+  - MEMORA_EMBED_DIM: expected embedding dim (default 1024; matches config/index-templates/mem-semantic.json).
+  - MEMORA_OS_AUTOFIX_VECTOR_DIM: if true, auto-adjusts knn_vector dimension in loaded mappings to MEMORA_EMBED_DIM.
+- Index naming:
+  - MEMORA_SEMANTIC_INDEX (default: mem-semantic)
+  - MEMORA_FACTS_INDEX (default: mem-facts)
+  - MEMORA_EPI_PREFIX (default: mem-episodic-)
+  - MEMORA_BOOTSTRAP_CREATE_TODAY: if true, also ensures today's episodic index (prefix + YYYY-MM-DD).
+
+Example:
+```bash
+export OPENSEARCH_URL=http://localhost:9200
+export MEMORA_BOOTSTRAP_OS=1
+export MEMORA_OS_MIN_HEALTH=yellow
+export MEMORA_OS_HEALTH_TIMEOUT_MS=30000
+export MEMORA_EMBED_DIM=1024
+# Optional auto-fix if your template's knn_vector dim differs
+# export MEMORA_OS_AUTOFIX_VECTOR_DIM=true
+
+npm run dev
+```
+
+Manual alternative (legacy):
+```bash
+./scripts/create_indices.sh
+```
+
 ---
  
 ## Minimal API

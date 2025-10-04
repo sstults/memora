@@ -39,13 +39,37 @@ export function getClient(): Client {
 /** Quick ping to verify connectivity; throws with a friendly message on failure. */
 export async function assertHealthy(): Promise<void> {
   const client = getClient();
+
+  // Configurable gating
+  const minStatus = ((process.env.MEMORA_OS_MIN_HEALTH || "yellow").toLowerCase()) as "yellow" | "green";
+  const timeoutMs = Number(process.env.MEMORA_OS_HEALTH_TIMEOUT_MS ?? 30000);
+  const timeout = `${Math.max(1, Math.ceil(timeoutMs / 1000))}s`;
+
   try {
-    const res = await client.ping();
-    const ok = (res as any)?.body ?? res;
-    if (!ok) throw new Error("OpenSearch ping returned false");
+    // Prefer cluster.health with wait_for_status to actually gate on readiness
+    const res = await (client as any).cluster.health({
+      wait_for_status: minStatus,
+      timeout
+    });
+
+    const body = (res as any)?.body ?? res;
+    const status: string = body?.status || "unknown";
+    const order: Record<string, number> = { red: 0, yellow: 1, green: 2 };
+
+    if ((order[status] ?? 0) < (order[minStatus] ?? 1)) {
+      throw new Error(`Cluster health '${status}' did not reach '${minStatus}' within ${timeout}`);
+    }
   } catch (err: any) {
     const node = process.env.OPENSEARCH_URL || "http://localhost:9200";
-    throw new Error(`Unable to reach OpenSearch at ${node}. Is Docker up and indices created? Root cause: ${err?.message || err}`);
+    // Fall back to a simple ping just to improve the error message if cluster.health is unsupported
+    try {
+      const ping = await (client as any).ping();
+      const ok = (ping as any)?.body ?? ping;
+      if (!ok) throw new Error("OpenSearch ping returned false");
+    } catch {
+      // ignore - original error is more actionable
+    }
+    throw new Error(`OpenSearch health check failed for ${node}. Ensure the cluster is up and reachable. Root cause: ${err?.message || err}`);
   }
 }
 
