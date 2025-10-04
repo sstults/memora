@@ -4,10 +4,12 @@ import fs from "fs";
 import {
   assertHealthy,
   ensureIndex,
-  putIndexTemplate
+  putIndexTemplate,
+  getClient
 } from "../../src/services/os-client";
 import { registerContext } from "../../src/routes/context";
 import { registerMemory } from "../../src/routes/memory";
+import { registerEval } from "../../src/routes/eval";
 
 type ToolFn = (req: any) => Promise<any>;
 
@@ -62,6 +64,7 @@ describe.runIf(run)("memory integration (OpenSearch required)", () => {
     // 3) Register tools
     registerContext(server);
     registerMemory(server);
+    registerEval(server);
 
     // 4) Set context
     const setCtx = tools.get("context.set_context")!;
@@ -83,7 +86,7 @@ describe.runIf(run)("memory integration (OpenSearch required)", () => {
 
     // Content includes a trivial fact pattern: "<subj> <p> <obj>"
     const content =
-      "Integration check: FeatureA introduced_in v1_0 and requires EngineX.\nAdditional details about usage and design.";
+      "Integration check: FeatureA introduced_in v1_0 and requires EngineX. This API design decision outlines the contract and describes a fix for reliability.\nAdditional details about usage, design, and API contract.";
 
     const wres = await write({
       params: {
@@ -113,5 +116,97 @@ describe.runIf(run)("memory integration (OpenSearch required)", () => {
     // Ideally we see at least one semantic hit
     const hasSemantic = rres.snippets.some((s: any) => s.source === "semantic");
     expect(hasSemantic).toBe(true);
+  });
+
+  it("touches last_used on retrieved semantic mems and can promote scope", async () => {
+    const write = tools.get("memory.write")!;
+    const retrieve = tools.get("memory.retrieve")!;
+    const promote = tools.get("memory.promote")!;
+
+    // Write another event
+    const content =
+      "Integration promote test: FeatureB introduced_in v2_0 and uses EngineY. API design decision and contract discussed to fix issues.";
+    const wres = await write({
+      params: { role: "tool", content, tags: ["test", "integration", "promote"] }
+    });
+    expect(wres?.ok).toBe(true);
+
+    // Retrieve to get semantic mems (which also triggers last_used touch)
+    const rres = await retrieve({
+      params: {
+        objective: "FeatureB introduced_in v2_0",
+        budget: 8,
+        filters: { scope: ["this_task", "project"] }
+      }
+    });
+    const semantic = rres.snippets.filter((s: any) => s.source === "semantic");
+    expect(semantic.length).toBeGreaterThan(0);
+
+    // Verify last_used was touched
+    const client = getClient();
+    await client.indices.refresh({ index: SEMANTIC_INDEX });
+    const memId = String(semantic[0].id).replace(/^mem:/, "");
+    const doc = await client.get({ index: SEMANTIC_INDEX, id: memId });
+    const src = ((doc as any).body ?? doc)?._source ?? {};
+    expect(src.last_used).toBeTruthy();
+    // last_used should be recent (within last 5 minutes)
+    expect(new Date(src.last_used).getTime()).toBeGreaterThan(Date.now() - 5 * 60_000);
+
+    // Promote to project scope and verify
+    const pres = await promote({ params: { mem_id: memId, to_scope: "project" } });
+    expect(pres?.ok).toBe(true);
+    await client.indices.refresh({ index: SEMANTIC_INDEX });
+    const doc2 = await client.get({ index: SEMANTIC_INDEX, id: memId });
+    const src2 = ((doc2 as any).body ?? doc2)?._source ?? {};
+    expect(src2.task_scope).toBe("project");
+  });
+
+  it("logs eval metrics with retrieved ids", async () => {
+    const write = tools.get("memory.write")!;
+    const retrieve = tools.get("memory.retrieve")!;
+    const elog = tools.get("eval.log")!;
+    const METRICS_INDEX = process.env.MEMORA_METRICS_INDEX || "mem-metrics";
+
+    // Ensure metrics index exists (avoid relying on auto-create)
+    await ensureIndex(METRICS_INDEX);
+
+    // Write and retrieve to produce snippet ids
+    const content =
+      "Eval logging check: FeatureC requires EngineZ. API design decision and contract notes for retrieval; exception handling and fix details included.";
+    const wres = await write({
+      params: { role: "tool", content, tags: ["test", "integration", "eval"] }
+    });
+    expect(wres?.ok).toBe(true);
+
+    const rres = await retrieve({
+      params: {
+        objective: "FeatureC requires EngineZ",
+        budget: 6,
+        filters: { scope: ["this_task", "project"] }
+      }
+    });
+    expect(Array.isArray(rres?.snippets)).toBe(true);
+    const ids = rres.snippets.map((s: any) => s.id);
+
+    // Log eval metrics
+    const eres = await elog({
+      params: {
+        step: 1,
+        success: true,
+        tokens_in: 10,
+        latency_ms: 5,
+        retrieved_ids: ids
+      }
+    });
+    expect(eres?.ok).toBe(true);
+    expect(typeof eres?.id).toBe("string");
+
+    // Verify document persisted with retrieved_count
+    const client = getClient();
+    const doc = await client.get({ index: METRICS_INDEX, id: eres.id });
+    const src = ((doc as any).body ?? doc)?._source ?? {};
+    expect(src.retrieved_count).toBe(ids.length);
+    expect(src.project_id).toBe("integration");
+    expect(src.task_id).toBe("task-1");
   });
 });
