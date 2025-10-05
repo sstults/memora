@@ -23,7 +23,7 @@
       "env":{"type":"keyword"},
       "source_event_ids":{"type":"keyword"},
       "embedding":{
-        "type":"knn_vector","dimension":1024,
+        "type":"knn_vector","dimension":384,
         "method":{"name":"hnsw","space_type":"cosinesimil","engine":"lucene","parameters":{"ef_construction":512,"m":32}}
       }
     }

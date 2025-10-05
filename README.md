@@ -91,10 +91,10 @@ Memora can automatically gate on OpenSearch cluster health and bootstrap templat
   - MEMORA_BOOTSTRAP_OS: set to 1 or true to enable bootstrap at startup.
   - Applies episodic index template and ensures base indices exist idempotently.
 - Vector dim validation:
-  - MEMORA_EMBED_DIM: expected embedding dim (default 1024; matches config/index-templates/mem-semantic.json).
+  - MEMORA_EMBED_DIM: expected embedding dim (default 384; matches config/index-templates/mem-semantic.json).
   - MEMORA_OS_AUTOFIX_VECTOR_DIM: if true, auto-adjusts knn_vector dimension in loaded mappings to MEMORA_EMBED_DIM.
 - Index naming:
-  - MEMORA_SEMANTIC_INDEX (default: mem-semantic)
+  - MEMORA_SEMANTIC_INDEX (default: mem-semantic; alias recommended to mem-semantic-384)
   - MEMORA_FACTS_INDEX (default: mem-facts)
   - MEMORA_EPI_PREFIX (default: mem-episodic-)
   - MEMORA_IDEMP_INDEX (default: mem-idempotency) for idempotent write records
@@ -110,7 +110,7 @@ export OPENSEARCH_URL=http://localhost:19200
 export MEMORA_BOOTSTRAP_OS=1
 export MEMORA_OS_MIN_HEALTH=yellow
 export MEMORA_OS_HEALTH_TIMEOUT_MS=30000
-export MEMORA_EMBED_DIM=1024
+export MEMORA_EMBED_DIM=384
 # Optional auto-fix if your template's knn_vector dim differs
 # export MEMORA_OS_AUTOFIX_VECTOR_DIM=true
 
@@ -249,7 +249,7 @@ For local development without external services, you can run lightweight mock se
   ```
   - API: POST /embed with
     ```json
-    { "texts": ["hello world", "another"], "dim": 1024 }
+    { "texts": ["hello world", "another"], "dim": 384 }
     ```
     Response:
     ```json
