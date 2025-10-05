@@ -83,6 +83,7 @@ vi.mock("../../src/services/os-client.js", () => ({
 import { registerContext } from "../../src/routes/context";
 import { registerMemory } from "../../src/routes/memory";
 import { registerEval } from "../../src/routes/eval";
+import { registerPack } from "../../src/routes/pack";
 
 type ToolFn = (req: any) => Promise<any>;
 
@@ -94,6 +95,7 @@ describe.runIf(process.env.E2E === "1")("MCP E2E (in-process tool surface, OS mo
     registerContext(server);
     registerMemory(server);
     registerEval(server);
+    registerPack(server);
 
     const setCtx = tools.get("context.set_context")!;
     await setCtx({
@@ -213,5 +215,97 @@ describe.runIf(process.env.E2E === "1")("MCP E2E (in-process tool surface, OS mo
     await expect(
       retrieve({ params: { objective: "anything", budget: 1 } })
     ).rejects.toThrow(/No active context set/i);
+  });
+
+  it("context.ensure_context sets context when missing and is a no-op when already set", async () => {
+    const ensure = tools.get("context.ensure_context")!;
+    // First call should create
+    const created = await ensure({
+      params: {
+        tenant_id: "memora",
+        project_id: "e2e",
+        context_id: "ctx-e2e-2",
+        task_id: "task-2",
+        env: "test",
+        api_version: "3.1"
+      }
+    });
+    expect(created?.ok).toBe(true);
+    expect(created?.created).toBe(true);
+
+    // Second call should return existing without creating
+    const again = await ensure({
+      params: {
+        tenant_id: "memora",
+        project_id: "e2e"
+      }
+    });
+    expect(again?.ok).toBe(true);
+    expect(again?.created).toBe(false);
+    expect(again?.context?.project_id).toBe("e2e");
+  });
+
+  it("pack.prompt packs provided sections according to config", async () => {
+    const pack = tools.get("pack.prompt")!;
+    const pres = await pack({
+      params: {
+        sections: [
+          { name: "system", content: "You are a helpful agent." },
+          { name: "retrieved", content: "Snippet A\nSnippet B" }
+        ]
+      }
+    });
+    expect(typeof pres?.packed).toBe("string");
+    expect(pres.packed).toMatch(/## System/);
+  });
+
+  it("memory.write_if_salient returns written=false for low-salience and true for salient content", async () => {
+    const writeIf = tools.get("memory.write_if_salient")!;
+    const low = await writeIf({ params: { role: "tool", content: "x", tags: ["e2e"] } });
+    expect(low?.ok).toBe(true);
+    expect(low?.written).toBe(false);
+
+    const hi = await writeIf({
+      params: {
+        role: "tool",
+        content: "FeatureZ introduced_in v9_9 and requires EngineQ.",
+        tags: ["e2e", "salient"]
+      }
+    });
+    expect(hi?.ok).toBe(true);
+    expect(hi?.written).toBe(true);
+    expect(typeof hi?.event_id).toBe("string");
+  });
+
+  it("memory.retrieve_and_pack returns snippets and a packed_prompt", async () => {
+    const rnp = tools.get("memory.retrieve_and_pack")!;
+    const res = await rnp({
+      params: {
+        objective: "FeatureA introduced_in v1_0",
+        budget: 3,
+        filters: { scope: ["this_task", "project"] },
+        system: "System X",
+        task_frame: "Do Y",
+        tool_state: "state Z",
+        recent_turns: "TURN A\n---TURN---\nTURN B"
+      }
+    });
+    expect(Array.isArray(res?.snippets)).toBe(true);
+    expect(typeof res?.packed_prompt).toBe("string");
+    expect(res.packed_prompt).toMatch(/## Retrieved Memory/);
+  });
+
+  it("memory.autopromote promotes top-N semantic memories", async () => {
+    const auto = tools.get("memory.autopromote")!;
+    const res = await auto({ params: { to_scope: "project", limit: 1, sort_by: "last_used" } });
+    expect(res?.ok).toBe(true);
+    expect(Array.isArray(res?.promoted)).toBe(true);
+  });
+
+  it("memory.promote accepts mem: prefixed ids", async () => {
+    const promote = tools.get("memory.promote")!;
+    const res = await promote({ params: { mem_id: "mem:sem1", to_scope: "project" } });
+    expect(res?.ok).toBe(true);
+    expect(res?.mem_id).toBe("sem1");
   });
 });

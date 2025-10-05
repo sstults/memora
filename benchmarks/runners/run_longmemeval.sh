@@ -30,18 +30,16 @@ mkdir -p "$(dirname "$out")" || mkdir -p benchmarks/reports
 # Ensure ts-node registration is available for TS runners in this repo
 NODE_RUNNER="node --import ./scripts/register-ts-node.mjs"
 
-# Placeholder run: emit a header JSON for the trial (replace this block with actual harness execution)
-$NODE_RUNNER -e "
-  const entry = {
-    ts: new Date().toISOString(),
-    op: 'run_longmemeval',
-    variant: '${variant}',
-    seed: Number(${seed}),
-    model_config_path: 'benchmarks/config/llm.json',
-    memora_config_path: 'benchmarks/config/memora.json',
-    note: 'TODO: integrate LongMemEval harness and append per-step JSONL results here'
-  };
-  console.log(JSON.stringify(entry));
-" > "$out"
+# Build TS to JS and prefer compiled runner; fallback to ts-node if missing
+if npm run build >/dev/null 2>&1; then
+  :
+fi
+
+if [[ -f "dist/benchmarks/runners/longmemeval.js" ]]; then
+  node dist/benchmarks/runners/longmemeval.js --variant "${variant}" --seed "${seed}" --out "${out}"
+else
+  # Fallback to ts-node registration
+  $NODE_RUNNER benchmarks/runners/longmemeval.ts --variant "${variant}" --seed "${seed}" --out "${out}"
+fi
 
 echo "Wrote ${out}"

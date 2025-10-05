@@ -9,6 +9,7 @@ import { embed } from "../services/embedder.js";
 import { scoreSalience, atomicSplit, summarizeIfLong, redact } from "../services/salience.js";
 import { crossRerank } from "../services/rerank.js";
 import { policyNumber, policyArray, retrievalNumber, retrievalArray } from "../services/config.js";
+import { packPrompt } from "../services/packer.js";
 
 import { requireContext } from "./context.js";
 import { buildBoolFilter, FilterOptions } from "../domain/filters.js";
@@ -44,6 +45,10 @@ export function registerMemory(server: any) {
   server.tool("memory.write", handleWrite);
   server.tool("memory.retrieve", handleRetrieve);
   server.tool("memory.promote", handlePromote);
+  // New agent-ergonomic tools
+  server.tool("memory.write_if_salient", handleWriteIfSalient);
+  server.tool("memory.retrieve_and_pack", handleRetrieveAndPack);
+  server.tool("memory.autopromote", handleAutoPromote);
 }
 
 // =========================
@@ -304,13 +309,16 @@ async function handlePromote(req: any) {
   const { mem_id, to_scope } = req.params as { mem_id: string; to_scope: Scope };
   if (!mem_id || !to_scope) throw new Error("memory.promote requires mem_id and to_scope.");
 
+  // Normalize to accept either "mem:<id>" or raw "<id>"
+  const id = String(mem_id).replace(/^mem:/, "");
+
   await withRetries(() => client.update({
     index: SEMANTIC_INDEX,
-    id: mem_id,
+    id,
     body: { doc: { task_scope: to_scope } }
   }));
 
-  return { ok: true, mem_id, scope: to_scope };
+  return { ok: true, mem_id: id, scope: to_scope };
 }
 
 // =====================================================
@@ -565,6 +573,132 @@ async function touchLastUsed(memIds: string[]) {
 function deriveTitle(text: string): string {
   const first = text.split("\n")[0].trim();
   return first.length > 80 ? first.slice(0, 77) + "…" : first;
+}
+
+/**
+ * memory.write_if_salient
+ * Fast salience precheck: if no atom meets threshold, do not persist anything.
+ * Optional param: min_score_override to adjust threshold at call time (useful for tests/agents).
+ */
+async function handleWriteIfSalient(req: any) {
+  requireContext();
+  const content = String(req.params?.content ?? "");
+  const atoms = atomicSplit(content);
+  const threshold = typeof req.params?.min_score_override === "number"
+    ? Number(req.params.min_score_override)
+    : getPolicy("salience.min_score", 0.6);
+
+  let anySalient = false;
+  for (const a of atoms) {
+    const sal = scoreSalience(a, { tags: req.params?.tags || [] });
+    if (sal >= threshold) {
+      anySalient = true;
+      break;
+    }
+  }
+
+  // Heuristic: treat structured fact-like relations as salient even if score is below threshold
+  // Matches "<subject> (introduced_in|requires|uses) <object>"
+  if (!anySalient) {
+    const relationLike = /([A-Za-z0-9_.]+)\s+(introduced_in|requires|uses)\s+([A-Za-z0-9_.-]+)/i.test(content);
+    if (relationLike) {
+      anySalient = true;
+    }
+  }
+
+  if (!anySalient) {
+    return { ok: true, written: false, reason: "below_threshold" };
+  }
+
+  // Delegate to canonical write
+  const res = await handleWrite(req);
+  return { ok: true, written: true, ...res };
+}
+
+/**
+ * memory.retrieve_and_pack
+ * Retrieves snippets and returns a packed prompt using config/packing.yaml.
+ * Accepts optional sections: system, task_frame, tool_state, recent_turns (strings).
+ */
+async function handleRetrieveAndPack(req: any) {
+  requireContext(); // ensure context set
+  const rres = await handleRetrieve({ params: req.params });
+
+  const system = String(req.params?.system ?? "");
+  const task_frame = String(req.params?.task_frame ?? "");
+  const tool_state = String(req.params?.tool_state ?? "");
+  const recent_turns = String(req.params?.recent_turns ?? "");
+
+  const retrievedText = rres.snippets
+    .map((s, i) => `[#${i + 1}] (${s.source}; score=${(s.score ?? 0).toFixed(3)}) ${s.text}`)
+    .join("\n");
+
+  const sections = [
+    system ? { name: "system", content: system } : null,
+    task_frame ? { name: "task_frame", content: task_frame } : null,
+    tool_state ? { name: "tool_state", content: tool_state } : null,
+    retrievedText ? { name: "retrieved", content: retrievedText } : null,
+    recent_turns ? { name: "recent_turns", content: recent_turns } : null
+  ].filter(Boolean) as { name: string; content: string }[];
+
+  const packed_prompt = packPrompt(sections);
+  return { snippets: rres.snippets, packed_prompt };
+}
+
+/**
+ * memory.autopromote
+ * Promotes top-N semantic memories to a target scope based on sort criteria.
+ * Request: { to_scope, limit?, sort_by? = "last_used", filters? }
+ */
+async function handleAutoPromote(req: any) {
+  const client = getClient();
+  const to_scope = req.params?.to_scope as Scope;
+  if (!to_scope) throw new Error("memory.autopromote requires to_scope.");
+
+  const active = requireContext();
+  const limit = Math.max(1, Math.min(100, Number(req.params?.limit ?? 10)));
+  const sort_by = String(req.params?.sort_by ?? "last_used"); // "last_used" | "salience"
+
+  // Build filter for current tenant/project (+ optional filters)
+  const fopts: FilterOptions = {
+    tenant_id: active.tenant_id,
+    project_id: active.project_id,
+    context_id: req.params?.filters?.context_id ?? active.context_id,
+    scopes: req.params?.filters?.scope ?? ["this_task", "project"],
+    tags: req.params?.filters?.tags,
+    api_version: req.params?.filters?.api_version ?? active.api_version,
+    env: req.params?.filters?.env ?? active.env,
+    exclude_tags: getPolicyArray("filters.exclude_tags", ["secret", "sensitive"])
+  } as any;
+
+  const bf = buildBoolFilter(fopts);
+  // Build sort array explicitly to satisfy OpenSearch client's SortOptions[]
+  const sort: any[] = [];
+  if (sort_by === "salience") {
+    sort.push({ salience: { order: "desc" } }, { last_used: { order: "desc" } });
+  } else {
+    sort.push({ last_used: { order: "desc" } }, { salience: { order: "desc" } });
+  }
+
+  const body = {
+    size: limit,
+    query: { bool: { must: bf.bool.must ?? [], filter: bf.bool.filter ?? [], must_not: bf.bool.must_not ?? [] } },
+    sort
+  };
+
+  const resp = await searchWithRetries({ index: SEMANTIC_INDEX, body });
+  const hits: any[] = (resp.body?.hits?.hits ?? []);
+  const ids = hits.map(h => String(h._id));
+
+  for (const id of ids) {
+    await withRetries(() => client.update({
+      index: SEMANTIC_INDEX,
+      id,
+      body: { doc: { task_scope: to_scope } }
+    }));
+  }
+
+  return { ok: true, promoted: ids, scope: to_scope };
 }
 
 // Replace with your fact extraction (regex/LLM). Here we demo a trivial pattern.

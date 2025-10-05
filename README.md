@@ -9,7 +9,7 @@ It is designed to support **long-running tasks, multi-project contexts, and coll
 ## Features
 
 - **Context Management**
-  - Switch between projects, tasks, and environments (`context.set_context`, `context.get_context`).
+  - Switch between projects, tasks, and environments (`context.set_context`, `context.ensure_context`, `context.get_context`, `context.clear_context`).
 - **Memory Write & Retrieval**
   - Store events into episodic, semantic, and fact stores.
   - Retrieve using BM25, k-NN embeddings, and structured fact lookups.
@@ -152,12 +152,20 @@ export MEMORA_EVAL_EPISODIC_MIRROR=true
 
 ## Minimal API
 
+See docs/agent-integration.md for the full agent-facing MCP tool catalog and recommended flows.
+
 Tools and shapes (request params in MCP tool calls):
 - context.set_context
   - Request: { tenant_id, project_id, context_id, task_id, env, api_version }
   - Response: { ok: true, context } (or error on missing tenant_id/project_id)
+- context.ensure_context
+  - Request: { tenant_id, project_id, context_id?, task_id?, env?, api_version? }
+  - Response: { ok: true, context, created: boolean }
+  - Notes: If no active context, sets it and returns created=true; otherwise returns existing context with created=false.
 - context.get_context
   - Response: { ok: true, context } or { ok: false, message }
+- context.clear_context
+  - Response: { ok: true }
 - memory.write
   - Request: { role, content, tags?, artifacts?, task_id?, idempotency_key?, hash? }
   - Response: { ok: true, event_id, semantic_upserts, facts_upserts }
@@ -169,9 +177,22 @@ Tools and shapes (request params in MCP tool calls):
       task_id?, context_id?
     }
   - Response: { snippets: [{ id, text, score, source, tags, why, context }] }
+- memory.write_if_salient
+  - Request: same as memory.write (+ optional min_score_override)
+  - Response: { ok: true, written: boolean, reason?: "below_threshold", event_id?, semantic_upserts?, facts_upserts? }
+- memory.retrieve_and_pack
+  - Request: memory.retrieve params + optional { system?, task_frame?, tool_state?, recent_turns? }
+  - Response: { snippets, packed_prompt }
+- memory.autopromote
+  - Request: { to_scope, limit?, sort_by?("last_used"|"salience"), filters? }
+  - Response: { ok: true, promoted: string[], scope }
 - memory.promote
   - Request: { mem_id, to_scope }
   - Response: { ok: true, mem_id, scope }
+  - Notes: Accepts either raw ids or mem:* prefixed ids.
+- pack.prompt
+  - Request: { sections: [{ name, content, tokens? }] }
+  - Response: { packed: string }
 - eval.log
   - Request: { step, success, tokens_in, latency_ms, cost_usd?, retrieved_ids?, p_at_k?, groundedness? }
   - Response: { ok: true, id }

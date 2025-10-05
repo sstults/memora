@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerMemory } from "./routes/memory.js";
 import { registerEval } from "./routes/eval.js";
 import { registerContext } from "./routes/context.js";
+import { registerPack } from "./routes/pack.js";
 import { bootstrapOpenSearch } from "./services/os-bootstrap.js";
 
 async function main() {
@@ -11,6 +12,7 @@ async function main() {
   registerContext(server);
   registerMemory(server);
   registerEval(server);
+  registerPack(server);
 
   // Optionally bootstrap OpenSearch if enabled
   if ((process.env.MEMORA_BOOTSTRAP_OS || "") === "1" || (process.env.MEMORA_BOOTSTRAP_OS || "").toLowerCase() === "true") {
