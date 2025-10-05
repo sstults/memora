@@ -310,6 +310,21 @@ This repo uses Vitest for unit, integration, and e2e test layers.
   # Enable integration test run
   INTEGRATION=1 npm run test:integration
   ```
+
+- Search pipeline provisioning example (idempotency + optional default attachment):
+  ```bash
+  # With OpenSearch running and indices created (see above), run:
+  INTEGRATION=1 \
+  MEMORA_EMBED_PROVIDER=opensearch_pipeline \
+  MEMORA_SEMANTIC_INDEX=mem-semantic \
+  MEMORA_OS_SEARCH_PIPELINE_NAME=mem-search \
+  MEMORA_OS_SEARCH_DEFAULT_PIPELINE_ATTACH=false \
+  MEMORA_OS_SEARCH_PIPELINE_BODY_JSON='{"request_processors":[{"filter_query":{"description":"integration smoke","query":{"match_all":{}}}}],"response_processors":[]}' \
+  npm run test:integration
+
+  # To also assert default attachment, set:
+  # MEMORA_OS_SEARCH_DEFAULT_PIPELINE_ATTACH=true
+  ```
 - Run e2e tests (skeleton, off by default):
   ```bash
   E2E=1 npm run test:e2e

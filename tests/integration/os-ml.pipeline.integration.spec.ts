@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { ensureSearchPipelineFromEnv } from "../../src/services/os-ml";
+import { getClient } from "../../src/services/os-client";
 
 // Integration test skeleton for search pipeline provisioning.
 // This suite is gated by INTEGRATION=1 and expects a live OpenSearch at OPENSEARCH_URL.
@@ -41,8 +43,40 @@ suite("os-ml search pipeline integration (INTEGRATION gated)", () => {
     expect(parsed).toBeTypeOf("object");
     expect(Array.isArray(parsed.request_processors)).toBe(true);
 
-    // TODO (enhancement): When cluster is available, import ensureSearchPipelineFromEnv and:
-    //  - call it to create/update the pipeline idempotently
-    //  - optionally set MEMORA_OS_SEARCH_DEFAULT_PIPELINE_ATTACH=true and assert index settings
+  // TODO (enhancement): When cluster is available, import ensureSearchPipelineFromEnv and:
+  //  - call it to create/update the pipeline idempotently
+  //  - optionally set MEMORA_OS_SEARCH_DEFAULT_PIPELINE_ATTACH=true and assert index settings
+  });
+
+  it("provisions search pipeline idempotently and optionally attaches default", async () => {
+    // Preconditions already handled by suite gating via INTEGRATION and REQUIRED_ENV
+    const name = process.env.MEMORA_OS_SEARCH_PIPELINE_NAME!;
+    const attach =
+      (process.env.MEMORA_OS_SEARCH_DEFAULT_PIPELINE_ATTACH || "false").toLowerCase() === "true";
+    const index = process.env.MEMORA_SEMANTIC_INDEX || "mem-semantic";
+
+    // Create/update twice to validate idempotency
+    await expect(ensureSearchPipelineFromEnv()).resolves.toBeUndefined();
+    await expect(ensureSearchPipelineFromEnv()).resolves.toBeUndefined();
+
+    // Verify pipeline exists via GET /_search/pipeline/{id}
+    const client = getClient();
+    const getResp = await (client as any).transport.request({
+      method: "GET",
+      path: `/_search/pipeline/${encodeURIComponent(name)}`
+    });
+    const body = (getResp as any)?.body ?? getResp;
+    expect(body).toBeTruthy();
+
+    // If configured to attach default, assert index.search.default_pipeline is set
+    if (attach) {
+      const settingsResp = await client.indices.getSettings({ index } as any);
+      const settingsBody: any = (settingsResp as any).body ?? settingsResp;
+      const firstKey = Object.keys(settingsBody)[0];
+      const def =
+        settingsBody[firstKey]?.settings?.index?.search?.default_pipeline ??
+        settingsBody[firstKey]?.settings?.index?.["search.default_pipeline"];
+      expect(def).toBe(name);
+    }
   });
 });
