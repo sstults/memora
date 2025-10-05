@@ -1,6 +1,6 @@
 services:
   opensearch-node1:
-    image: opensearchproject/opensearch:2.18.0
+    image: opensearchproject/opensearch:3.2.0
     container_name: opensearch-node1
     environment:
       - cluster.name=memora-cluster
@@ -8,26 +8,27 @@ services:
       - discovery.type=single-node
       - bootstrap.memory_lock=true
       - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
-      - plugins.security.disabled=true    # disable for local dev; enable in prod
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - DISABLE_SECURITY_PLUGIN=true
     ulimits:
       memlock:
         soft: -1
         hard: -1
     volumes:
-      - os-data:/usr/share/opensearch/data
+      - os-data-32:/usr/share/opensearch/data
     ports:
-      - "9200:9200"   # OpenSearch API
-      - "9600:9600"   # Performance analyzer
+      - "19200:9200"   # OpenSearch API (host mapped to 19200 to avoid conflicts)
+      - "19600:9600"   # Performance analyzer (host mapped to 19600 to avoid conflicts)
 
   dashboards:
-    image: opensearchproject/opensearch-dashboards:2.18.0
+    image: opensearchproject/opensearch-dashboards:3.2.0
     container_name: memora-dashboards
     environment:
       - OPENSEARCH_HOSTS=http://opensearch-node1:9200
     ports:
-      - "5601:5601"   # Dashboards UI
+      - "15601:5601"   # Dashboards UI (host mapped to 15601)
     depends_on:
       - opensearch-node1
 
 volumes:
-  os-data:
+  os-data-32:
