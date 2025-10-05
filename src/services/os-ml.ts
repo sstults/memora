@@ -139,7 +139,6 @@ export async function ensurePipelineAndAttachmentFromEnv(): Promise<void> {
   const modelId = process.env.OPENSEARCH_ML_MODEL_ID;
   if (!modelId) {
     // Do not throw to avoid breaking bootstrap; log guidance instead.
-    // eslint-disable-next-line no-console
     console.warn(
       "[memora:os-ml] OPENSEARCH_ML_MODEL_ID is not set. Skipping ingest pipeline creation. " +
         "Set a deployed ML model id to enable text_embedding pipeline provisioning."
