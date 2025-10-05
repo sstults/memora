@@ -357,6 +357,38 @@ Integration tests in CI:
   - `tests/integration/**` (guarded by `INTEGRATION=1`)
   - `tests/e2e/**` (guarded by `E2E=1`)
 
+## Embeddings via OpenSearch ML Pipelines (optional)
+
+You can use OpenSearch ML Commons to generate embeddings inside the cluster via pipelines. This reduces app-side complexity and HTTP calls.
+
+Requirements:
+- OpenSearch 3.2+ with ML Commons, Neural Search, and k-NN plugins
+- An ONNX embedding model registered and deployed (e.g., MiniLM-L6 384-dim)
+
+Environment configuration:
+- Provider selection
+  - MEMORA_EMBED_PROVIDER=opensearch_pipeline
+- Model configuration (defaults shown for local/dev)
+  - OPENSEARCH_ML_MODEL_NAME=huggingface/sentence-transformers/all-MiniLM-L6-v2
+  - OPENSEARCH_ML_MODEL_VERSION=1.0.2
+  - OPENSEARCH_ML_MODEL_FORMAT=ONNX
+- Pipelines
+  - MEMORA_OS_INGEST_PIPELINE_NAME=mem-text-embed
+  - MEMORA_OS_DEFAULT_PIPELINE_ATTACH=false
+- Vector dim alignment
+  - MEMORA_EMBED_DIM should match your model output dimension (MiniLM-L6 ONNX is 384)
+  - MEMORA_OS_AUTOFIX_VECTOR_DIM=true can auto-adjust loaded mappings to the expected dimension
+
+Manual steps (until automated in bootstrap):
+1) Register and deploy the model via ML Commons API (ONNX recommended for dev resource usage).
+2) Create an ingest pipeline using the text_embedding processor referencing your deployed model_id.
+3) Optionally attach that ingest pipeline as the default_pipeline for your semantic index.
+4) Ensure your semantic index mapping uses knn_vector with the correct dimension (e.g., 384). You can set MEMORA_OS_AUTOFIX_VECTOR_DIM=true to auto-adjust the loaded body at bootstrap time.
+
+Notes:
+- The text_embedding ingest processor on 3.2 does not support token_limit.
+- A search-time pipeline (ml-inference request) to embed queries server-side is planned next.
+
 ## Release (GitHub-only)
 
 This repository uses a tag-driven GitHub Actions workflow located at `.github/workflows/release.yml`. It runs automatically when you push a tag matching `v*.*.*` (for example, `v0.1.0`). The workflow:
