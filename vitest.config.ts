@@ -29,7 +29,7 @@ export default defineConfig({
         branches: 70
       }
     },
-    hookTimeout: 20000,
-    testTimeout: 10000
+    hookTimeout: process.env.INTEGRATION ? 120000 : 20000,
+    testTimeout: process.env.INTEGRATION ? 120000 : 10000
   }
 });
