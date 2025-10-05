@@ -128,6 +128,7 @@ Troubleshooting (alias conflict):
     - Create a concrete index (e.g., mem-semantic-384) and point alias "mem-semantic" to it.
     - In dev, reindex/rename or delete the conflicting index so "mem-semantic" can be an alias.
   - scripts/create_indices.sh will skip alias creation and print remediation guidance when this conflict is detected.
+  - For automated remediation in dev, use scripts/alias_hygiene.sh (--reindex or --delete-existing). Review its usage header before running.
 
 ---
  
@@ -420,6 +421,7 @@ Bootstrap provisioning:
   - Create or update the ingest pipeline (MEMORA_OS_INGEST_PIPELINE_NAME) using OPENSEARCH_ML_MODEL_ID, mapping MEMORA_OS_TEXT_SOURCE_FIELD → MEMORA_OS_EMBED_FIELD
   - If OPENSEARCH_ML_MODEL_ID is unset and MEMORA_OS_AUTO_REGISTER_MODEL=true, attempt to auto-register and deploy the default ONNX model (dev-only; best-effort)
   - Optionally attach that ingest pipeline as the index default_pipeline when MEMORA_OS_DEFAULT_PIPELINE_ATTACH=true
+  - Cache resolved model_id to .memora/model_id (dev-only; override via MEMORA_OS_MODEL_ID_CACHE_FILE) to reduce first-run latency
 
 What remains manual:
 1) Register and deploy the model via ML Commons to obtain OPENSEARCH_ML_MODEL_ID (or set MEMORA_OS_AUTO_REGISTER_MODEL=true for dev to auto-register/deploy a default ONNX model); ONNX recommended for dev resource usage.
