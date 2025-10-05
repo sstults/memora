@@ -1,3 +1,4 @@
+import { beforeAll } from "vitest";
 /* Vitest global setup for Memora tests.
  * - Keep Node fetch available (Node 20+)
  * - Set sane default envs for deterministic behavior
@@ -19,3 +20,23 @@ console.warn = (...args: any[]) => {
   if (String(args[0] ?? "").includes("[embedder] remote endpoint failed")) return;
   origWarn(...args);
 };
+
+// Integration test readiness gate and client tuning
+if (process.env.INTEGRATION === "1") {
+  process.env.MEMORA_OS_MIN_HEALTH = process.env.MEMORA_OS_MIN_HEALTH || "yellow";
+  process.env.MEMORA_OS_HEALTH_TIMEOUT_MS = process.env.MEMORA_OS_HEALTH_TIMEOUT_MS || "120000";
+  process.env.MEMORA_OS_CLIENT_TIMEOUT_MS = process.env.MEMORA_OS_CLIENT_TIMEOUT_MS || "30000";
+  process.env.MEMORA_OS_CLIENT_MAX_RETRIES = process.env.MEMORA_OS_CLIENT_MAX_RETRIES || "5";
+  // Prefer docker-compose remap unless explicitly overridden
+  process.env.OPENSEARCH_URL = process.env.OPENSEARCH_URL || "http://localhost:19200";
+
+  // Defer import to avoid pulling client in unit runs
+  const gate = async () => {
+    const mod = await import("../src/services/os-client");
+    await mod.assertHealthy();
+  };
+
+  beforeAll(async () => {
+    await gate();
+  }, 120000);
+}

@@ -4,8 +4,8 @@
 //   OPENSEARCH_URL (default: http://localhost:9200)
 //   OPENSEARCH_USERNAME / OPENSEARCH_PASSWORD (optional)
 //   OPENSEARCH_SSL_REJECT_UNAUTHORIZED=false (optional; for self-signed local dev)
-//   MEMORA_OS_MAX_RETRIES=3
-//   MEMORA_OS_REQUEST_TIMEOUT_MS=10000
+ //   MEMORA_OS_CLIENT_MAX_RETRIES=3 (preferred; falls back to MEMORA_OS_MAX_RETRIES)
+ //   MEMORA_OS_CLIENT_TIMEOUT_MS=10000 (preferred; falls back to MEMORA_OS_REQUEST_TIMEOUT_MS)
 
 import { Client } from "@opensearch-project/opensearch";
 
@@ -18,8 +18,8 @@ export function getClient(): Client {
   const username = process.env.OPENSEARCH_USERNAME;
   const password = process.env.OPENSEARCH_PASSWORD;
   const rejectUnauthorized = (process.env.OPENSEARCH_SSL_REJECT_UNAUTHORIZED ?? "true") !== "false";
-  const maxRetries = Number(process.env.MEMORA_OS_MAX_RETRIES ?? 3);
-  const requestTimeout = Number(process.env.MEMORA_OS_REQUEST_TIMEOUT_MS ?? 10000);
+  const maxRetries = Number(process.env.MEMORA_OS_CLIENT_MAX_RETRIES ?? process.env.MEMORA_OS_MAX_RETRIES ?? 3);
+  const requestTimeout = Number(process.env.MEMORA_OS_CLIENT_TIMEOUT_MS ?? process.env.MEMORA_OS_REQUEST_TIMEOUT_MS ?? 10000);
 
   // Build client opts
   const opts: any = {

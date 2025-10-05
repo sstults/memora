@@ -101,8 +101,8 @@ Memora can automatically gate on OpenSearch cluster health and bootstrap templat
   - MEMORA_BOOTSTRAP_CREATE_TODAY: if true, also ensures today's episodic index (prefix + YYYY-MM-DD).
 
 - Retries/Timeouts:
-  - MEMORA_OS_MAX_RETRIES: maximum retry attempts for OpenSearch operations (default: 3).
-  - MEMORA_OS_REQUEST_TIMEOUT_MS: request timeout in milliseconds for OpenSearch client (default: 10000).
+  - MEMORA_OS_CLIENT_MAX_RETRIES (preferred; falls back to MEMORA_OS_MAX_RETRIES): maximum retry attempts for OpenSearch operations (default: 3).
+  - MEMORA_OS_CLIENT_TIMEOUT_MS (preferred; falls back to MEMORA_OS_REQUEST_TIMEOUT_MS): request timeout in milliseconds for OpenSearch client (default: 10000).
 
 Example:
 ```bash
@@ -121,6 +121,13 @@ Manual alternative (legacy):
 ```bash
 ./scripts/create_indices.sh
 ```
+
+Troubleshooting (alias conflict):
+- If you see "Invalid alias name [mem-semantic], an index exists with the same name as the alias":
+  - A real index named "mem-semantic" already exists. Use an alias-first pattern:
+    - Create a concrete index (e.g., mem-semantic-384) and point alias "mem-semantic" to it.
+    - In dev, reindex/rename or delete the conflicting index so "mem-semantic" can be an alias.
+  - scripts/create_indices.sh will skip alias creation and print remediation guidance when this conflict is detected.
 
 ---
  
