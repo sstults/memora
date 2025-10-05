@@ -311,6 +311,15 @@ This repo uses Vitest for unit, integration, and e2e test layers.
   INTEGRATION=1 npm run test:integration
   ```
 
+- Helper script (recommended for local dev):
+  ```bash
+  # Sets required env safely and runs the integration suite
+  bash scripts/run_integration.sh
+
+  # Also attach the search pipeline as index.search.default_pipeline
+  bash scripts/run_integration.sh --attach
+  ```
+
 - Search pipeline provisioning example (idempotency + optional default attachment):
   ```bash
   # With OpenSearch running and indices created (see above), run:
