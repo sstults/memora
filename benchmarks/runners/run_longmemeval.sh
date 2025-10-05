@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-mkdir -p "$(dirname "$out")"
+mkdir -p "$(dirname "$out")" || mkdir -p benchmarks/reports
 
 # Ensure ts-node registration is available for TS runners in this repo
 NODE_RUNNER="node --import ./scripts/register-ts-node.mjs"
@@ -42,6 +42,6 @@ $NODE_RUNNER -e "
     note: 'TODO: integrate LongMemEval harness and append per-step JSONL results here'
   };
   console.log(JSON.stringify(entry));
-" > \"$out\"
+" > "$out"
 
-echo \"Wrote ${out}\"
+echo "Wrote ${out}"
