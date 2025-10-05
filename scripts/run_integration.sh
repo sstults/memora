@@ -47,6 +47,33 @@ fi
 # OpenSearch endpoint (defaults to local Docker Compose remap)
 export OPENSEARCH_URL="${OPENSEARCH_URL:-http://localhost:19200}"
 
+# Wait until OpenSearch is ready (cluster health yellow/green) before running tests
+wait_for_os() {
+  local url="${OPENSEARCH_URL}"
+  local timeout_sec="${MEMORA_OS_READY_TIMEOUT_SEC:-300}"
+  local interval_sec="${MEMORA_OS_READY_INTERVAL_SEC:-3}"
+  local start
+  start=$(date +%s)
+  echo "[memora] Waiting for OpenSearch at ${url} to become healthy (timeout=${timeout_sec}s)..."
+  while true; do
+    # Query cluster health with a 1s server-side timeout; treat HTTP 200 as ready
+    local code
+    code=$(curl -s -o /dev/null -w "%{http_code}" "${url}/_cluster/health?wait_for_status=yellow&timeout=1s" || true)
+    if [[ "$code" == "200" ]]; then
+      echo "[memora] OpenSearch is healthy (>= yellow)."
+      return 0
+    fi
+    local now elapsed
+    now=$(date +%s)
+    elapsed=$(( now - start ))
+    if (( elapsed >= timeout_sec )); then
+      echo "[memora] ERROR: OpenSearch did not become healthy within ${timeout_sec}s" >&2
+      return 1
+    fi
+    sleep "${interval_sec}"
+  done
+}
+
 echo "[memora] Running integration tests with:"
 echo "  OPENSEARCH_URL=$OPENSEARCH_URL"
 echo "  MEMORA_SEMANTIC_INDEX=$MEMORA_SEMANTIC_INDEX"
@@ -58,4 +85,5 @@ echo "  MEMORA_OS_DEFAULT_PIPELINE_ATTACH=$MEMORA_OS_DEFAULT_PIPELINE_ATTACH"
 echo "  MEMORA_OS_AUTO_REGISTER_MODEL=$MEMORA_OS_AUTO_REGISTER_MODEL"
 echo "  OPENSEARCH_ML_MODEL_ID=${OPENSEARCH_ML_MODEL_ID:-<unset>}"
 
+wait_for_os
 npm run test:integration
