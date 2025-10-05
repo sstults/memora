@@ -18,6 +18,11 @@ export INTEGRATION=1
 export MEMORA_EMBED_PROVIDER="${MEMORA_EMBED_PROVIDER:-opensearch_pipeline}"
 export MEMORA_SEMANTIC_INDEX="${MEMORA_SEMANTIC_INDEX:-mem-semantic}"
 
+# Ingest pipeline env (for auto-register path)
+export MEMORA_OS_INGEST_PIPELINE_NAME="${MEMORA_OS_INGEST_PIPELINE_NAME:-mem-text-embed}"
+export MEMORA_OS_DEFAULT_PIPELINE_ATTACH="${MEMORA_OS_DEFAULT_PIPELINE_ATTACH:-false}"
+export MEMORA_OS_AUTO_REGISTER_MODEL="${MEMORA_OS_AUTO_REGISTER_MODEL:-false}"
+
 # Search pipeline env
 export MEMORA_OS_SEARCH_PIPELINE_NAME="${MEMORA_OS_SEARCH_PIPELINE_NAME:-mem-search}"
 export MEMORA_OS_SEARCH_DEFAULT_PIPELINE_ATTACH="${MEMORA_OS_SEARCH_DEFAULT_PIPELINE_ATTACH:-false}"
@@ -29,8 +34,14 @@ if [[ -z "${MEMORA_OS_SEARCH_PIPELINE_BODY_JSON:-}" ]]; then
 fi
 
 # Optional flag to attach pipeline as index.search.default_pipeline
-if [[ "${1:-}" == "--attach" ]]; then
+if [[ "${1:-}" == "--attach" ]] || [[ "${2:-}" == "--attach" ]]; then
   export MEMORA_OS_SEARCH_DEFAULT_PIPELINE_ATTACH=true
+fi
+
+# Enable dev auto-register path and clear explicit model id if provided
+if [[ "${1:-}" == "--auto-register" ]] || [[ "${2:-}" == "--auto-register" ]]; then
+  export MEMORA_OS_AUTO_REGISTER_MODEL=true
+  unset OPENSEARCH_ML_MODEL_ID
 fi
 
 # OpenSearch endpoint (defaults to local Docker Compose remap)
@@ -42,5 +53,9 @@ echo "  MEMORA_SEMANTIC_INDEX=$MEMORA_SEMANTIC_INDEX"
 echo "  MEMORA_OS_SEARCH_PIPELINE_NAME=$MEMORA_OS_SEARCH_PIPELINE_NAME"
 echo "  MEMORA_OS_SEARCH_DEFAULT_PIPELINE_ATTACH=$MEMORA_OS_SEARCH_DEFAULT_PIPELINE_ATTACH"
 echo "  MEMORA_OS_SEARCH_PIPELINE_BODY_JSON=$MEMORA_OS_SEARCH_PIPELINE_BODY_JSON"
+echo "  MEMORA_OS_INGEST_PIPELINE_NAME=$MEMORA_OS_INGEST_PIPELINE_NAME"
+echo "  MEMORA_OS_DEFAULT_PIPELINE_ATTACH=$MEMORA_OS_DEFAULT_PIPELINE_ATTACH"
+echo "  MEMORA_OS_AUTO_REGISTER_MODEL=$MEMORA_OS_AUTO_REGISTER_MODEL"
+echo "  OPENSEARCH_ML_MODEL_ID=${OPENSEARCH_ML_MODEL_ID:-<unset>}"
 
 npm run test:integration
