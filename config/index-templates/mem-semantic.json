@@ -24,7 +24,7 @@
       "source_event_ids":{"type":"keyword"},
       "embedding":{
         "type":"knn_vector","dimension":1024,
-        "method":{"name":"hnsw","space_type":"cosinesimil","engine":"faiss","parameters":{"ef_construction":512,"m":32}}
+        "method":{"name":"hnsw","space_type":"cosinesimil","engine":"lucene","parameters":{"ef_construction":512,"m":32}}
       }
     }
   }
