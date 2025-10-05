@@ -135,6 +135,93 @@ function estimateTokensApprox(text: string): number {
   return Math.ceil(s.length / 4);
 }
 
+/* Helpers for baselines A and B */
+
+// Flatten sessions to a simple list of turn texts (in chronological order)
+function flattenSessions(sessions: Turn[][]): string[] {
+  const texts: string[] = [];
+  for (const session of sessions) {
+    for (const turn of session) {
+      const t = (turn?.content ?? turn?.text ?? "").toString();
+      if (t && t.trim()) texts.push(t.trim());
+    }
+  }
+  return texts;
+}
+
+// Build sliding-window context from the last N turns
+function buildSlidingWindowContext(sessions: Turn[][], windowTurns: number): string {
+  const texts = flattenSessions(sessions);
+  const recent = texts.slice(Math.max(0, texts.length - windowTurns));
+  if (recent.length === 0) return "";
+  const lines = recent.map((t, i) => `Turn -${recent.length - i}: ${t}`);
+  return `Recent context (sliding window ${windowTurns}):\n` + lines.join("\n");
+}
+
+// Simple vector ops for baseline B
+type Vec = number[];
+
+function dot(a: Vec, b: Vec): number {
+  let s = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) s += a[i] * b[i];
+  return s;
+}
+
+function norm(a: Vec): number {
+  return Math.sqrt(dot(a, a));
+}
+
+function cosineSim(a: Vec, b: Vec): number {
+  const na = norm(a);
+  const nb = norm(b);
+  if (na === 0 || nb === 0) return 0;
+  return dot(a, b) / (na * nb);
+}
+
+async function embedText(openai: any, model: string, text: string): Promise<Vec> {
+  const resp = await openai.embeddings.create({
+    model,
+    input: text
+  });
+  const v = resp?.data?.[0]?.embedding;
+  return Array.isArray(v) ? (v as number[]) : [];
+}
+
+async function buildVectorRagContext(
+  openai: any,
+  sessions: Turn[][],
+  question: string,
+  k: number,
+  embedModel: string,
+  cache: Map<string, Vec>
+): Promise<string> {
+  const texts = flattenSessions(sessions);
+  const candidates = texts.filter((t) => !!t);
+  if (candidates.length === 0) return "";
+
+  // Embed question
+  const qVec = await embedText(openai, embedModel, question || "question");
+
+  // Embed candidates with simple cache
+  const items: { text: string; vec: Vec }[] = [];
+  for (const t of candidates) {
+    let v = cache.get(t);
+    if (!v) {
+      v = await embedText(openai, embedModel, t);
+      cache.set(t, v);
+    }
+    items.push({ text: t, vec: v });
+  }
+
+  // Rank by cosine similarity to the question
+  items.sort((a, b) => cosineSim(b.vec, qVec) - cosineSim(a.vec, qVec));
+  const top = items.slice(0, Math.max(1, k)).map((it) => it.text);
+
+  const lines = top.map((t, i) => `${i + 1}. ${t}`);
+  return `Top-${Math.max(1, k)} relevant snippets (vector baseline):\n` + lines.join("\n");
+}
+
 async function createOpenAI(): Promise<any> {
   const apiKey = process.env.OPENAI_API_KEY ?? process.env.OPEN_AI_KEY;
   if (!apiKey) return null;
@@ -220,15 +307,72 @@ async function main() {
     throw err;
   }
 
-  // Variant A/B: for now, produce a deterministic stub hypothesis (no Memora calls).
+  // Variants A and B baselines (no Memora policies)
   if (variant !== "C") {
+    // Require OpenAI for baselines; otherwise fallback to stub outputs
+    if (!openai) {
+      for (let i = 0; i < examples.length; i++) {
+        const ex = examples[i];
+        const qid = extractQuestionId(ex, i);
+        writeJSONL(out, { question_id: qid, hypothesis: "" });
+      }
+      process.stdout.write(`LongMemEvalDriver (no OPENAI_API_KEY) wrote ${examples.length} stub predictions to ${out}\n`);
+      return;
+    }
+
+    const k = typeof (memoraCfg?.retrieval_budget) === "number" ? memoraCfg.retrieval_budget : 8;
+    const windowTurns = typeof (memoraCfg?.sliding_window_turns) === "number" ? memoraCfg.sliding_window_turns : k;
+    const embedModel = llmCfg?.embeddings_model ?? "text-embedding-3-small";
+    const embedCache = new Map<string, number[]>();
+
     for (let i = 0; i < examples.length; i++) {
       const ex = examples[i];
       const qid = extractQuestionId(ex, i);
-      // Minimal placeholder: empty hypothesis to validate scoring plumbing; update in a later step.
-      writeJSONL(out, { question_id: qid, hypothesis: "" });
+      const sessions = asTurnsField(ex);
+      const question = extractQuestion(ex);
+
+      let contextText = "";
+      if (variant === "A") {
+        // Sliding-window: last N turns only
+        contextText = buildSlidingWindowContext(sessions, windowTurns);
+      } else {
+        // Vector RAG baseline without Memora policies
+        try {
+          contextText = await buildVectorRagContext(openai, sessions, question || "", k, embedModel, embedCache);
+        } catch {
+          // Fallback to sliding window if embeddings fail
+          contextText = buildSlidingWindowContext(sessions, windowTurns);
+        }
+      }
+
+      let hypothesis = "";
+      let tokens_in: number | null = null;
+      let tokens_out: number | null = null;
+      let llm_latency_ms: number | null = null;
+      try {
+        const result = await answerWithOpenAI(openai, llmCfg, question || "", contextText);
+        hypothesis = result.text;
+        llm_latency_ms = typeof (result as any)?.latency_ms === "number" ? (result as any).latency_ms : null;
+
+        const usage = (result as any)?.usage;
+        const inCandidates = usage?.prompt_tokens ?? usage?.input_tokens ?? null;
+        const outCandidates = usage?.completion_tokens ?? usage?.output_tokens ?? null;
+        if (typeof inCandidates === "number" && typeof outCandidates === "number") {
+          tokens_in = inCandidates;
+          tokens_out = outCandidates;
+        } else {
+          tokens_in = estimateTokensApprox(question || "") + estimateTokensApprox(contextText) + 20;
+          tokens_out = estimateTokensApprox(hypothesis || "");
+        }
+      } catch {
+        // If the LLM call fails, leave an empty hypothesis for this question
+        hypothesis = "";
+      }
+
+      writeJSONL(out, { question_id: qid, hypothesis, tokens_in, tokens_out, llm_latency_ms });
     }
-    process.stdout.write(`LongMemEvalDriver wrote ${examples.length} predictions to ${out}\n`);
+
+    process.stdout.write(`LongMemEvalDriver (variant ${variant}) wrote ${examples.length} predictions to ${out}\n`);
     return;
   }
 

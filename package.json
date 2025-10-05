@@ -23,6 +23,9 @@
     "dev:reranker": "node --import ./scripts/register-ts-node.mjs scripts/dev/reranker_server.ts",
     "prepare": "husky",
     "bench:longmem": "bash benchmarks/runners/run_longmemeval.sh --variant C --seed 42 --out benchmarks/reports/longmemeval.C.42.jsonl",
+    "bench:longmem:A": "bash benchmarks/runners/run_longmemeval.sh --variant A --seed 42 --out benchmarks/reports/longmemeval.A.42.jsonl",
+    "bench:longmem:B": "bash benchmarks/runners/run_longmemeval.sh --variant B --seed 42 --out benchmarks/reports/longmemeval.B.42.jsonl",
+    "bench:longmem:C": "bash benchmarks/runners/run_longmemeval.sh --variant C --seed 42 --out benchmarks/reports/longmemeval.C.42.jsonl",
     "bench:longmem:driver": "node --import ./scripts/register-ts-node.mjs benchmarks/runners/longmemeval_driver.ts --dataset benchmarks/LongMemEval/data/longmemeval_oracle.json --out benchmarks/reports/memora_predictions.jsonl --variant C --seed 42",
     "bench:longmem:score": "node --import ./scripts/register-ts-node.mjs benchmarks/runners/score_longmemeval.ts --hyp benchmarks/reports/memora_predictions.jsonl --dataset benchmarks/LongMemEval/data/longmemeval_oracle.json --tag memora",
     "bench:longmem:smoke": "npm run bench:longmem:driver && npm run bench:longmem:score"
