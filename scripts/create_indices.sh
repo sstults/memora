@@ -24,9 +24,12 @@ curl -s -XPUT "$OS/mem-facts" \
   --data-binary @config/index-templates/mem-facts.json
 
 # 4) Attach alias for client stability (mem-semantic -> mem-semantic-384)
-# Note: remove step best-effort; if unsupported, add should still work for fresh clusters.
-curl -s -XPOST "$OS/_aliases" \
-  -H 'Content-Type: application/json' \
-  -d "{\"actions\":[{\"remove\":{\"index\":\"*\",\"alias\":\"$ALIAS_NAME\"}},{\"add\":{\"index\":\"$SEMANTIC_INDEX\",\"alias\":\"$ALIAS_NAME\"}}]}"
-
-echo "Indices ready. Alias ${ALIAS_NAME} -> ${SEMANTIC_INDEX}"
+# If an index exists with the alias name, skip to avoid conflict
+if [[ "$(curl -s -o /dev/null -w "%{http_code}" "$OS/$ALIAS_NAME")" == "200" ]]; then
+  echo "Indices ready. Skipped alias '${ALIAS_NAME}' because an index with the same name exists." >&2
+else
+  curl -s -XPOST "$OS/_aliases" \
+    -H 'Content-Type: application/json' \
+    -d "{\"actions\":[{\"remove\":{\"index\":\"*\",\"alias\":\"$ALIAS_NAME\"}},{\"add\":{\"index\":\"$SEMANTIC_INDEX\",\"alias\":\"$ALIAS_NAME\"}}]}"
+  echo "Indices ready. Alias ${ALIAS_NAME} -> ${SEMANTIC_INDEX}"
+fi
