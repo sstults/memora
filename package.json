@@ -21,7 +21,8 @@
     "coverage": "vitest run --coverage",
     "dev:embedder": "node --import ./scripts/register-ts-node.mjs scripts/dev/embedder_server.ts",
     "dev:reranker": "node --import ./scripts/register-ts-node.mjs scripts/dev/reranker_server.ts",
-    "prepare": "husky"
+    "prepare": "husky",
+    "bench:longmem": "bash benchmarks/runners/run_longmemeval.sh --variant C --seed 42 --out benchmarks/reports/longmemeval.C.42.jsonl"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.19.1",
