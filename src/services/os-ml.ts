@@ -157,13 +157,115 @@ export async function attachDefaultSearchPipelineToIndex(opts: {
   );
 }
 
+/** Dev-only helpers: model auto-register/deploy for OpenSearch ML Commons (best-effort). */
+async function pollMlTask(client: Client, taskId: string, timeoutMs = 90000, intervalMs = 1000): Promise<any> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const resp = await withRetries(() =>
+      (client as any).transport.request({
+        method: "GET",
+        path: `/_plugins/_ml/tasks/${encodeURIComponent(taskId)}`
+      })
+    );
+    const body: any = (resp as any)?.body ?? resp;
+    const state: string | undefined = body?.state || body?.task?.state;
+    if (state === "COMPLETED") return body;
+    if (state === "FAILED") {
+      const reason = body?.error || body?.task?.error || "unknown";
+      throw new Error(`ML task ${taskId} failed: ${typeof reason === "string" ? reason : JSON.stringify(reason)}`);
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error(`Timed out waiting for ML task ${taskId} completion after ${timeoutMs}ms`);
+}
+
+/**
+ * Attempt to auto-register and deploy a default embedding model (dev-only).
+ * Returns model_id on success, otherwise undefined. Controlled by MEMORA_OS_AUTO_REGISTER_MODEL.
+ */
+async function ensureModelRegisteredDeployedFromEnv(client: Client): Promise<string | undefined> {
+  const auto =
+    (process.env.MEMORA_OS_AUTO_REGISTER_MODEL || "false").toLowerCase() === "true";
+  if (!auto) return undefined;
+
+  const name = process.env.OPENSEARCH_ML_MODEL_NAME || "huggingface/sentence-transformers/all-MiniLM-L6-v2";
+  const version = process.env.OPENSEARCH_ML_MODEL_VERSION || "1.0.2";
+  const format = (process.env.OPENSEARCH_ML_MODEL_FORMAT || "ONNX").toUpperCase();
+
+  // Attempt registration (shapes vary by OS version; handle task_id or model_id)
+  let regResp: any;
+  try {
+    regResp = await withRetries(() =>
+      (client as any).transport.request({
+        method: "POST",
+        path: "/_plugins/_ml/models/_register",
+        body: {
+          name,
+          version,
+          model_format: format,
+          model_task_type: "TEXT_EMBEDDING"
+        }
+      })
+    );
+  } catch (e: any) {
+    console.warn(
+      `[memora:os-ml] Auto-register failed (${name} ${version} ${format}): ${e?.message || e}`
+    );
+    return undefined;
+  }
+
+  const regBody: any = (regResp as any)?.body ?? regResp;
+  let modelId: string | undefined = regBody?.model_id;
+  const regTaskId: string | undefined = regBody?.task_id;
+
+  try {
+    if (!modelId && regTaskId) {
+      const task = await pollMlTask(client, regTaskId);
+      modelId = task?.model_id || task?.task?.model_id || task?.model?.model_id;
+    }
+  } catch (e: any) {
+    console.warn(
+      `[memora:os-ml] Auto-register task polling failed: ${e?.message || e}`
+    );
+    return undefined;
+  }
+
+  if (!modelId) {
+    console.warn("[memora:os-ml] Could not resolve model_id from registration response");
+    return undefined;
+  }
+
+  // Deploy the model; some versions return task_id — poll if present
+  try {
+    const depResp = await withRetries(() =>
+      (client as any).transport.request({
+        method: "POST",
+        path: `/_plugins/_ml/models/${encodeURIComponent(modelId)}/_deploy`
+      })
+    );
+    const depBody: any = (depResp as any)?.body ?? depResp;
+    const depTaskId: string | undefined = depBody?.task_id;
+    if (depTaskId) {
+      await pollMlTask(client, depTaskId);
+    }
+  } catch (e: any) {
+    // Non-fatal: deployment may already exist or shape differs; continue
+    console.warn(
+      `[memora:os-ml] Auto-deploy warning for model ${modelId}: ${e?.message || e}`
+    );
+  }
+
+  return modelId;
+}
+
 /**
  * Orchestrate pipeline creation and optional default_pipeline attachment using env.
  * Safe to call unconditionally; it is a no-op unless MEMORA_EMBED_PROVIDER=opensearch_pipeline.
  *
  * Env (commonly set in .env.example):
  * - MEMORA_EMBED_PROVIDER=opensearch_pipeline
- * - OPENSEARCH_ML_MODEL_ID=<required to create pipeline>
+ * - OPENSEARCH_ML_MODEL_ID=<optional; required unless MEMORA_OS_AUTO_REGISTER_MODEL=true>
+ * - MEMORA_OS_AUTO_REGISTER_MODEL=true|false  (dev-only auto-register/deploy default model when model id is unset)
  * - MEMORA_OS_INGEST_PIPELINE_NAME=mem-text-embed
  * - MEMORA_OS_TEXT_SOURCE_FIELD=text
  * - MEMORA_OS_EMBED_FIELD=embedding
@@ -187,13 +289,15 @@ export async function ensurePipelineAndAttachmentFromEnv(): Promise<void> {
     (process.env.MEMORA_OS_DEFAULT_PIPELINE_ATTACH || "false").toLowerCase() === "true";
   const semanticIndex = process.env.MEMORA_SEMANTIC_INDEX || "mem-semantic";
 
-  // Require a provided model id for stability across OS versions
-  const modelId = process.env.OPENSEARCH_ML_MODEL_ID;
+  // Resolve model id: prefer explicit OPENSEARCH_ML_MODEL_ID; fallback to dev-only auto-register if enabled
+  let modelId = process.env.OPENSEARCH_ML_MODEL_ID;
   if (!modelId) {
-    // Do not throw to avoid breaking bootstrap; log guidance instead.
+    modelId = await ensureModelRegisteredDeployedFromEnv(client);
+  }
+  if (!modelId) {
     console.warn(
-      "[memora:os-ml] OPENSEARCH_ML_MODEL_ID is not set. Skipping ingest pipeline creation. " +
-        "Set a deployed ML model id to enable text_embedding pipeline provisioning."
+      "[memora:os-ml] OPENSEARCH_ML_MODEL_ID is not set and auto-register is disabled or failed. " +
+        "Skipping ingest pipeline creation. Set a deployed ML model id or enable MEMORA_OS_AUTO_REGISTER_MODEL=true for dev."
     );
     return;
   }
