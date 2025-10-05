@@ -30,9 +30,10 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.19.1",
     "@opensearch-project/opensearch": "^3.0.0",
+    "dotenv": "^17.2.3",
     "js-yaml": "^4.1.0",
-    "uuid": "^9.0.1",
-    "openai": "^4.58.1"
+    "openai": "^4.58.1",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",

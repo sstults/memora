@@ -7,6 +7,7 @@
    - Current implementation does NOT call an LLM; it produces a stub hypothesis to validate E2E scoring flow.
      Next step: integrate OpenAI client per benchmarks/config/llm.json to generate real answers.
 */
+import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
@@ -127,7 +128,7 @@ function loadJSON<T = any>(p: string): T {
 }
 
 async function createOpenAI(): Promise<any> {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY ?? process.env.OPEN_AI_KEY;
   if (!apiKey) return null;
   const mod: any = await import("openai");
   const OpenAI = mod?.default ?? mod;
