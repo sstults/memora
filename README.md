@@ -396,7 +396,7 @@ Environment configuration:
   - OPENSEARCH_ML_MODEL_NAME=huggingface/sentence-transformers/all-MiniLM-L6-v2
   - OPENSEARCH_ML_MODEL_VERSION=1.0.2
   - OPENSEARCH_ML_MODEL_FORMAT=ONNX
-  - OPENSEARCH_ML_MODEL_ID=<your_deployed_model_id>  <!-- required to create/update the ingest pipeline -->
+  - OPENSEARCH_ML_MODEL_ID=<your_deployed_model_id>  <!-- required unless MEMORA_OS_AUTO_REGISTER_MODEL=true (dev-only) -->
   - MEMORA_OS_APPLY_DEV_ML_SETTINGS=true|false
 - Pipelines
   - MEMORA_OS_INGEST_PIPELINE_NAME=mem-text-embed
@@ -411,10 +411,11 @@ Bootstrap provisioning:
 - When MEMORA_BOOTSTRAP_OS=1 and MEMORA_EMBED_PROVIDER=opensearch_pipeline, Memora will on startup:
   - Optionally apply dev ML settings when MEMORA_OS_APPLY_DEV_ML_SETTINGS=true
   - Create or update the ingest pipeline (MEMORA_OS_INGEST_PIPELINE_NAME) using OPENSEARCH_ML_MODEL_ID, mapping MEMORA_OS_TEXT_SOURCE_FIELD → MEMORA_OS_EMBED_FIELD
+  - If OPENSEARCH_ML_MODEL_ID is unset and MEMORA_OS_AUTO_REGISTER_MODEL=true, attempt to auto-register and deploy the default ONNX model (dev-only; best-effort)
   - Optionally attach that ingest pipeline as the index default_pipeline when MEMORA_OS_DEFAULT_PIPELINE_ATTACH=true
 
 What remains manual:
-1) Register and deploy the model via ML Commons to obtain OPENSEARCH_ML_MODEL_ID (ONNX recommended for dev resource usage).
+1) Register and deploy the model via ML Commons to obtain OPENSEARCH_ML_MODEL_ID (or set MEMORA_OS_AUTO_REGISTER_MODEL=true for dev to auto-register/deploy a default ONNX model); ONNX recommended for dev resource usage.
 2) Ensure your semantic index mapping uses knn_vector with the correct dimension (e.g., 384) or set MEMORA_OS_AUTOFIX_VECTOR_DIM=true to auto-adjust loaded bodies at bootstrap time.
 
 Notes:
