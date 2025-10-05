@@ -1,7 +1,32 @@
 #!/usr/bin/env bash
 set -euo pipefail
-OS=${OS:-http://localhost:9200}
-curl -s -XPUT "$OS/_index_template/mem-episodic" -H 'Content-Type: application/json' --data-binary @config/index-templates/mem-episodic.json
-curl -s -XPUT "$OS/mem-semantic" -H 'Content-Type: application/json' --data-binary @config/index-templates/mem-semantic.json
-curl -s -XPUT "$OS/mem-facts"    -H 'Content-Type: application/json' --data-binary @config/index-templates/mem-facts.json
-echo "Indices ready."
+
+# OpenSearch base URL (default local dev port)
+OS="${OS:-http://localhost:9200}"
+
+# Semantic index naming and aliasing
+SEMANTIC_INDEX="${MEMORA_SEMANTIC_INDEX:-mem-semantic-384}"
+ALIAS_NAME="${MEMORA_SEMANTIC_ALIAS:-mem-semantic}"
+
+# 1) Apply episodic index template
+curl -s -XPUT "$OS/_index_template/mem-episodic" \
+  -H 'Content-Type: application/json' \
+  --data-binary @config/index-templates/mem-episodic.json
+
+# 2) Create semantic index (384-dim, lucene+cosinesimil) from template body
+curl -s -XPUT "$OS/$SEMANTIC_INDEX" \
+  -H 'Content-Type: application/json' \
+  --data-binary @config/index-templates/mem-semantic.json
+
+# 3) Create facts index
+curl -s -XPUT "$OS/mem-facts" \
+  -H 'Content-Type: application/json' \
+  --data-binary @config/index-templates/mem-facts.json
+
+# 4) Attach alias for client stability (mem-semantic -> mem-semantic-384)
+# Note: remove step best-effort; if unsupported, add should still work for fresh clusters.
+curl -s -XPOST "$OS/_aliases" \
+  -H 'Content-Type: application/json' \
+  -d "{\"actions\":[{\"remove\":{\"index\":\"*\",\"alias\":\"$ALIAS_NAME\"}},{\"add\":{\"index\":\"$SEMANTIC_INDEX\",\"alias\":\"$ALIAS_NAME\"}}]}"
+
+echo "Indices ready. Alias ${ALIAS_NAME} -> ${SEMANTIC_INDEX}"

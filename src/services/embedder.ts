@@ -6,7 +6,7 @@
 
 const ENDPOINT = process.env.EMBEDDING_ENDPOINT; // e.g., http://localhost:8080/embed
 const API_KEY = process.env.EMBEDDING_API_KEY || "";
-const DIM = Number(process.env.MEMORA_EMBED_DIM || 1024);
+const DIM = Number(process.env.MEMORA_EMBED_DIM || 384);
 const TIMEOUT_MS = Number(process.env.MEMORA_EMBED_TIMEOUT_MS || 8000);
 const MAX_RETRIES = Number(process.env.MEMORA_EMBED_RETRIES || 3);
 
