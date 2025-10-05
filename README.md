@@ -47,7 +47,7 @@ docker compose -f docker/docker-compose.yml up -d
 ## Dev Server
 ```bash
 cp .env.example .env
-# Set OPENSEARCH_URL (e.g., http://localhost:9200) and optionally EMBEDDING_ENDPOINT
+# Set OPENSEARCH_URL (e.g., http://localhost:19200 for local Docker Compose) and optionally EMBEDDING_ENDPOINT
 npm run dev
 ```
 
@@ -106,7 +106,7 @@ Memora can automatically gate on OpenSearch cluster health and bootstrap templat
 
 Example:
 ```bash
-export OPENSEARCH_URL=http://localhost:9200
+export OPENSEARCH_URL=http://localhost:19200
 export MEMORA_BOOTSTRAP_OS=1
 export MEMORA_OS_MIN_HEALTH=yellow
 export MEMORA_OS_HEALTH_TIMEOUT_MS=30000
@@ -208,7 +208,7 @@ mcpServers configuration (add this to your Cline MCP servers configuration):
       "args": ["run", "mcp"],
       "cwd": "/absolute/path/to/your/memora/repo",
       "env": {
-        "OPENSEARCH_URL": "http://localhost:9200",
+        "OPENSEARCH_URL": "http://localhost:19200",
         "MEMORA_BOOTSTRAP_OS": "1"
       }
     }
@@ -217,7 +217,7 @@ mcpServers configuration (add this to your Cline MCP servers configuration):
 ```
 
 Notes:
-- Set OPENSEARCH_URL to your OpenSearch endpoint. For local Docker: http://localhost:9200
+- Set OPENSEARCH_URL to your OpenSearch endpoint. For local Docker Compose: http://localhost:19200
 - MEMORA_BOOTSTRAP_OS=1 will idempotently apply index templates and ensure base indices on first run; remove after bootstrap if desired.
 - For deterministic local embeddings in development, leave EMBEDDING_ENDPOINT unset. To use a remote service, set EMBEDDING_ENDPOINT in env.
 - The npm script "mcp" starts only the MCP server entrypoint (no seeding or side effects).
@@ -338,7 +338,7 @@ This repo uses Vitest for unit, integration, and e2e test layers.
 ### Environment for tests
 - Unit tests do not require external services. `embedder` uses deterministic local fallback when `EMBEDDING_ENDPOINT` is unset.
 - Integration tests require:
-  - OpenSearch at `OPENSEARCH_URL` (default `http://localhost:9200`)
+  - OpenSearch at `OPENSEARCH_URL` (local Docker Compose default `http://localhost:19200`; CI default `http://localhost:9200`)
   - Index templates applied via `scripts/create_indices.sh`
 
 ### CI
