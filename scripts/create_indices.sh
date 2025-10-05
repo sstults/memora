@@ -26,10 +26,10 @@ curl -s -XPUT "$OS/mem-facts" \
 # 4) Attach alias for client stability (mem-semantic -> mem-semantic-384)
 # If an index exists with the alias name, skip to avoid conflict
 if [[ "$(curl -s -o /dev/null -w "%{http_code}" "$OS/$ALIAS_NAME")" == "200" ]]; then
-  echo "Indices ready. Skipped alias '${ALIAS_NAME}' because an index with the same name exists." >&2
+  echo "[memora] Skipped creating alias '${ALIAS_NAME}' because a real index with that name exists. To follow the alias-first pattern, do not create an index named '${ALIAS_NAME}'. Remediation: reindex/rename that index (or delete it in dev) so '${ALIAS_NAME}' can be an alias, then re-run this script." >&2
 else
   curl -s -XPOST "$OS/_aliases" \
     -H 'Content-Type: application/json' \
     -d "{\"actions\":[{\"remove\":{\"index\":\"*\",\"alias\":\"$ALIAS_NAME\"}},{\"add\":{\"index\":\"$SEMANTIC_INDEX\",\"alias\":\"$ALIAS_NAME\"}}]}"
-  echo "Indices ready. Alias ${ALIAS_NAME} -> ${SEMANTIC_INDEX}"
+  echo "[memora] Indices ready. Alias ${ALIAS_NAME} -> ${SEMANTIC_INDEX}"
 fi
