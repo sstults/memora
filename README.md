@@ -421,6 +421,56 @@ Notes:
 - The text_embedding ingest processor on 3.2 does not support token_limit.
 - A search-time pipeline is available to embed queries server-side using search processors. Configure MEMORA_OS_SEARCH_PIPELINE_NAME, MEMORA_OS_SEARCH_PIPELINE_BODY_JSON, and set MEMORA_OS_SEARCH_DEFAULT_PIPELINE_ATTACH=true to attach as the index.search.default_pipeline. See .env.example for examples and the OpenSearch docs for processor shapes.
 
+### Search pipeline examples (shapes vary by OpenSearch version; consult official docs)
+
+Example A — Request-time query embedding (ml_inference request processor):
+```json
+{
+  "request_processors": [
+    {
+      "ml_inference": {
+        "description": "Embed query and stash vector for kNN/neural",
+        "model_id": "YOUR_EMBED_MODEL_ID",
+        "input_map": { "text": "params.query_text" },
+        "output_map": { "vector": "ctx.query_vector" }
+      }
+    }
+  ],
+  "response_processors": []
+}
+```
+Notes:
+- Supply a query_text parameter to the pipeline (see OpenSearch docs for passing pipeline params).
+- Your search body can then reference the embedded vector (ctx.query_vector) in a neural/kNN query as supported by your version.
+
+Example B — Response-time reranking:
+```json
+{
+  "request_processors": [],
+  "response_processors": [
+    {
+      "rerank": {
+        "description": "Cross-encoder rerank of top_k hits",
+        "model_id": "YOUR_RERANK_MODEL_ID",
+        "top_k": 50
+      }
+    }
+  ]
+}
+```
+
+### search_pipeline parameter vs index.search.default_pipeline
+
+- Using the search_pipeline query parameter:
+  - Specify the pipeline on a per-request basis without changing index settings.
+  - Useful for A/B testing or gradual rollouts.
+  - Does not require index privileges to modify settings.
+
+- Attaching index.search.default_pipeline:
+  - The pipeline runs transparently for all searches on that index.
+  - Use MEMORA_OS_SEARCH_DEFAULT_PIPELINE_ATTACH=true with ensureSearchPipelineFromEnv or call attachDefaultSearchPipelineToIndex().
+  - Best for consistent behavior across all queries once validated.
+
 ## Release (GitHub-only)
 
 This repository uses a tag-driven GitHub Actions workflow located at `.github/workflows/release.yml`. It runs automatically when you push a tag matching `v*.*.*` (for example, `v0.1.0`). The workflow:
