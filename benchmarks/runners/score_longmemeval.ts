@@ -32,14 +32,14 @@ function assertFileExists(p: string, label: string) {
   }
 }
 
-function runPython(evalDir: string, args: string[]) {
-  const res = spawnSync("python3", args, {
+function runPython(evalDir: string, pythonBin: string, args: string[]) {
+  const res = spawnSync(pythonBin, args, {
     cwd: evalDir,
     stdio: "inherit"
   });
   if (res.error) throw res.error;
   if (typeof res.status === "number" && res.status !== 0) {
-    throw new Error(`python3 ${args.join(" ")} exited with code ${res.status}`);
+    throw new Error(`${pythonBin} ${args.join(" ")} exited with code ${res.status}`);
   }
 }
 
@@ -52,19 +52,66 @@ async function main() {
   assertFileExists(dataset, "Dataset JSON (--dataset)");
 
   // Paths must be relative to evalDir for the Python scripts
-  const hypRel = path.relative(evalDir, path.resolve(hyp));
-  const dsRel = path.relative(evalDir, path.resolve(dataset));
-  const logRel = `${hypRel}.log`;
+  // Also pre-filter the hypotheses file to only include lines with {question_id, hypothesis}
+  const hypAbs = path.resolve(hyp);
+  const dsAbs = path.resolve(dataset);
+
+  // Produce filtered hypotheses alongside original
+  const filteredHypAbs = hypAbs.replace(/\.jsonl$/, ".filtered.jsonl");
+  try {
+    const raw = fs.readFileSync(hypAbs, "utf8").split(/\r?\n/);
+    const out: string[] = [];
+    for (const line of raw) {
+      const s = line.trim();
+      if (!s) continue;
+      try {
+        const obj = JSON.parse(s);
+        if (obj && typeof obj === "object" && "question_id" in obj && "hypothesis" in obj) {
+          out.push(JSON.stringify({ question_id: obj.question_id, hypothesis: obj.hypothesis }));
+        }
+      } catch {
+        // ignore non-JSON lines (e.g., telemetry headers)
+      }
+    }
+    fs.writeFileSync(filteredHypAbs, out.join("\n") + (out.length ? "\n" : ""), "utf8");
+  } catch (e) {
+    throw new Error(`Failed to pre-filter hypotheses JSONL: ${e}`);
+  }
+
+  const hypRel = path.relative(evalDir, filteredHypAbs);
+  const dsRel = path.relative(evalDir, dsAbs);
+
+  // Choose Python interpreter: prefer LongMemEval venv if present
+  // evalDir = benchmarks/LongMemEval/src/evaluation
+  // venv is at benchmarks/LongMemEval/.venv-longmemeval/bin/python3 (two levels up)
+  const candidates = [
+    path.resolve(evalDir, "../../.venv-longmemeval/bin/python3"),
+    path.resolve(evalDir, "../.venv-longmemeval/bin/python3") // fallback if layout changes
+  ];
+  const venvPython = candidates.find((p) => fs.existsSync(p)) ?? "python3";
+
+  // Ensure minimal evaluator dependencies (idempotent)
+  // Workaround: httpx 0.28+ drops 'proxies' kwarg used by OpenAI client path in this evaluator.
+  // Pin compatible versions to avoid TypeError: Client.__init__() got an unexpected keyword argument 'proxies'
+  runPython(evalDir, venvPython, ["-m", "pip", "install", "httpx==0.27.2", "httpcore==1.0.7", "h11==0.14.0"]);
+  if (fs.existsSync(path.resolve(evalDir, "../../requirements-lite.txt"))) {
+    runPython(evalDir, venvPython, ["-m", "pip", "install", "-r", "../../requirements-lite.txt"]);
+  }
+
+  // Normalize model tag: LongMemEval expects a supported model tag (e.g., "gpt-4o")
+  const modelTag = (tag === "memora" || tag === "default" || tag === "") ? "gpt-4o" : tag;
+  const resultRel = `${hypRel}.eval-results-${modelTag}`;
 
   // 1) Evaluate QA (produces .log alongside the predictions path)
-  runPython(evalDir, ["evaluate_qa.py", tag, hypRel, dsRel]);
+  runPython(evalDir, venvPython, ["evaluate_qa.py", modelTag, hypRel, dsRel]);
 
-  // 2) Print metrics summary from the generated log
-  runPython(evalDir, ["print_qa_metrics.py", tag, logRel, dsRel]);
+  // 2) Print metrics summary from the generated log (expects just log file and dataset)
+  runPython(evalDir, venvPython, ["print_qa_metrics.py", resultRel, dsRel]);
 
   // Also echo absolute paths for convenience
+  const resultAbs = path.resolve(evalDir, resultRel);
   process.stdout.write(
-    `\nScoring complete.\n- Predictions: ${path.resolve(hyp)}\n- Log: ${path.resolve(hyp)}.log\n- Dataset: ${path.resolve(dataset)}\n`
+    `\nScoring complete.\n- Predictions (filtered used for eval): ${filteredHypAbs}\n- Eval Results: ${resultAbs}\n- Dataset: ${path.resolve(dataset)}\n`
   );
 }
 

@@ -15,6 +15,8 @@ import { performance } from "node:perf_hooks";
 import MemoryAdapter, { McpClient } from "../adapters/memora_adapter.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+/* OpenAI import deferred to runtime to avoid loader-time issues */
+// import OpenAI from "openai";
 
 type Variant = "A" | "B" | "C";
 
@@ -114,6 +116,52 @@ function extractQuestionId(sample: Sample, idx: number): string {
   return String(id);
 }
 
+// Load helper to read JSON config
+function loadJSON<T = any>(p: string): T {
+  try {
+    const s = fs.readFileSync(path.resolve(p), "utf8");
+    return JSON.parse(s) as T;
+  } catch {
+    return {} as T;
+  }
+}
+
+async function createOpenAI(): Promise<any> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  const mod: any = await import("openai");
+  const OpenAI = mod?.default ?? mod;
+  return new OpenAI({ apiKey });
+}
+
+async function answerWithOpenAI(openai: any, llmCfg: any, question: string, context: string): Promise<string> {
+  const model = llmCfg?.model ?? "gpt-4.1-mini";
+  const temperature = typeof llmCfg?.temperature === "number" ? llmCfg.temperature : 0.2;
+  const max_tokens = typeof llmCfg?.max_tokens === "number" ? llmCfg.max_tokens : 512;
+
+  const sys = "You are a focused assistant for question answering over provided context. Use the context if relevant; if the answer is not present, reply with \"I don't know\". Respond concisely with just the final answer, no explanation.";
+  const user = `Context:
+${context}
+
+Question:
+${question}
+
+Answer:`;
+
+  const resp = await openai.chat.completions.create({
+    model,
+    temperature,
+    max_tokens,
+    messages: [
+      { role: "system", content: sys },
+      { role: "user", content: user }
+    ]
+  });
+
+  const text = resp.choices?.[0]?.message?.content ?? "";
+  return (text ?? "").toString().trim();
+}
+
 async function replaySessionsToMemora(adapter: MemoryAdapter, seed: number, variant: Variant, qid: string, sessions: Turn[][]) {
   for (const [sIdx, session] of sessions.entries()) {
     for (const [tIdx, turn] of session.entries()) {
@@ -146,6 +194,11 @@ async function main() {
     variant,
     seed
   });
+
+  // Load configs and initialize LLM
+  const llmCfg = loadJSON<any>("benchmarks/config/llm.json");
+  const memoraCfg = loadJSON<any>("benchmarks/config/memora.json");
+  const openai = await createOpenAI();
 
   // Load dataset
   let examples: Sample[] = [];
@@ -184,7 +237,18 @@ async function main() {
       env
     });
     client = new Client({ name: "memora-longmemeval-driver", version: "0.1.0" });
-    await client.connect(transport);
+    try {
+      await client.connect(transport);
+    } catch (err: any) {
+      writeJSONL(out, { ts: new Date().toISOString(), op: "warn", stage: "mcp_connect", error: String(err?.message ?? err) });
+      for (let i = 0; i < examples.length; i++) {
+        const ex = examples[i];
+        const qid = extractQuestionId(ex, i);
+        writeJSONL(out, { question_id: qid, hypothesis: "" });
+      }
+      process.stdout.write(`LongMemEvalDriver (fallback: no MCP) wrote ${examples.length} predictions to ${out}\n`);
+      return;
+    }
 
     const mcpClient: McpClient = {
       callTool: async (name: string, params?: any) => {
@@ -211,7 +275,18 @@ async function main() {
       env: "bench",
       api_version: "3.1"
     };
-    await mcpClient.callTool("context.ensure_context", ctxParams);
+    try {
+      await mcpClient.callTool("context.ensure_context", ctxParams);
+    } catch (err: any) {
+      writeJSONL(out, { ts: new Date().toISOString(), op: "warn", stage: "ensure_context", error: String(err?.message ?? err) });
+      for (let i = 0; i < examples.length; i++) {
+        const ex = examples[i];
+        const qid = extractQuestionId(ex, i);
+        writeJSONL(out, { question_id: qid, hypothesis: "" });
+      }
+      process.stdout.write(`LongMemEvalDriver (fallback: context unavailable) wrote ${examples.length} predictions to ${out}\n`);
+      return;
+    }
 
     const adapter = new MemoryAdapter(mcpClient);
 
@@ -235,9 +310,23 @@ async function main() {
         // retrieval failures are non-fatal for emitting a stub prediction
       }
 
-      // Stub hypothesis: empty string to satisfy evaluator input requirements.
-      // TODO: In the next step, integrate OpenAI client using benchmarks/config/llm.json to generate real answers.
-      writeJSONL(out, { question_id: qid, hypothesis: "" });
+      let hypothesis = "";
+      try {
+        const pack = await adapter.pack(
+          question || "question",
+          (memoraCfg?.retrieval_budget ?? 8),
+          undefined,
+          memoraCfg?.filters,
+          { task_id: `longmemeval-${seed}` }
+        );
+        const contextText = pack?.data?.packed ?? "";
+        if (openai) {
+          hypothesis = await answerWithOpenAI(openai, llmCfg, question || "", contextText);
+        }
+      } catch (err: any) {
+        writeJSONL(out, { ts: new Date().toISOString(), op: "warn", stage: "llm", qid, error: String(err?.message ?? err) });
+      }
+      writeJSONL(out, { question_id: qid, hypothesis });
     }
 
     process.stdout.write(`LongMemEvalDriver wrote ${examples.length} predictions to ${out}\n`);
