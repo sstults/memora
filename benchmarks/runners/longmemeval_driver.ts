@@ -117,7 +117,7 @@ function extractQuestionId(sample: Sample, idx: number): string {
   return String(id);
 }
 
-// Load helper to read JSON config
+/* Load helper to read JSON config */
 function loadJSON<T = any>(p: string): T {
   try {
     const s = fs.readFileSync(path.resolve(p), "utf8");
@@ -125,6 +125,14 @@ function loadJSON<T = any>(p: string): T {
   } catch {
     return {} as T;
   }
+}
+
+/* Rough token estimator used when API usage is unavailable.
+   Approximation: ~4 characters per token. */
+function estimateTokensApprox(text: string): number {
+  const s = (text ?? "");
+  if (!s) return 0;
+  return Math.ceil(s.length / 4);
 }
 
 async function createOpenAI(): Promise<any> {
@@ -135,7 +143,7 @@ async function createOpenAI(): Promise<any> {
   return new OpenAI({ apiKey });
 }
 
-async function answerWithOpenAI(openai: any, llmCfg: any, question: string, context: string): Promise<string> {
+async function answerWithOpenAI(openai: any, llmCfg: any, question: string, context: string): Promise<{ text: string; usage?: any; latency_ms: number }> {
   const model = llmCfg?.model ?? "gpt-4.1-mini";
   const temperature = typeof llmCfg?.temperature === "number" ? llmCfg.temperature : 0.2;
   const max_tokens = typeof llmCfg?.max_tokens === "number" ? llmCfg.max_tokens : 512;
@@ -149,6 +157,7 @@ ${question}
 
 Answer:`;
 
+  const t0 = performance.now();
   const resp = await openai.chat.completions.create({
     model,
     temperature,
@@ -158,9 +167,10 @@ Answer:`;
       { role: "user", content: user }
     ]
   });
+  const latency_ms = performance.now() - t0;
 
   const text = resp.choices?.[0]?.message?.content ?? "";
-  return (text ?? "").toString().trim();
+  return { text: (text ?? "").toString().trim(), usage: resp?.usage, latency_ms };
 }
 
 async function replaySessionsToMemora(adapter: MemoryAdapter, seed: number, variant: Variant, qid: string, sessions: Turn[][]) {
@@ -312,6 +322,9 @@ async function main() {
       }
 
       let hypothesis = "";
+      let tokens_in: number | null = null;
+      let tokens_out: number | null = null;
+      let llm_latency_ms: number | null = null;
       try {
         const pack = await adapter.pack(
           question || "question",
@@ -322,12 +335,27 @@ async function main() {
         );
         const contextText = pack?.data?.packed ?? "";
         if (openai) {
-          hypothesis = await answerWithOpenAI(openai, llmCfg, question || "", contextText);
+          const result = await answerWithOpenAI(openai, llmCfg, question || "", contextText);
+          hypothesis = result.text;
+          llm_latency_ms = typeof (result as any)?.latency_ms === "number" ? (result as any).latency_ms : null;
+
+          const usage = (result as any)?.usage;
+          const inCandidates = usage?.prompt_tokens ?? usage?.input_tokens ?? null;
+          const outCandidates = usage?.completion_tokens ?? usage?.output_tokens ?? null;
+
+          if (typeof inCandidates === "number" && typeof outCandidates === "number") {
+            tokens_in = inCandidates;
+            tokens_out = outCandidates;
+          } else {
+            // Fallback: approximate token counts (question + context + small overhead)
+            tokens_in = estimateTokensApprox(question || "") + estimateTokensApprox(contextText) + 20;
+            tokens_out = estimateTokensApprox(hypothesis || "");
+          }
         }
       } catch (err: any) {
         writeJSONL(out, { ts: new Date().toISOString(), op: "warn", stage: "llm", qid, error: String(err?.message ?? err) });
       }
-      writeJSONL(out, { question_id: qid, hypothesis });
+      writeJSONL(out, { question_id: qid, hypothesis, tokens_in, tokens_out, llm_latency_ms });
     }
 
     process.stdout.write(`LongMemEvalDriver wrote ${examples.length} predictions to ${out}\n`);
