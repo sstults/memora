@@ -21,33 +21,19 @@ import { describe, it, expect } from "vitest";
 //   npm run test:integration
 
 const INTEGRATION = process.env.INTEGRATION === "1";
+const REQUIRED_ENV = [
+  "MEMORA_EMBED_PROVIDER",
+  "MEMORA_OS_SEARCH_PIPELINE_NAME",
+  "MEMORA_OS_SEARCH_PIPELINE_BODY_JSON"
+] as const;
+const MISSING = REQUIRED_ENV.filter((k) => !process.env[k]);
 
-describe("os-ml search pipeline integration (INTEGRATION gated)", () => {
-  if (!INTEGRATION) {
-    it.skip("integration tests disabled (set INTEGRATION=1 to enable)", () => {
-      // no-op
-    });
-    return;
-  }
+// Define-time skip: if INTEGRATION is not enabled or required env is missing,
+// mark the whole suite as skipped at definition time so CI cannot accidentally run it.
+const suite = (!INTEGRATION || MISSING.length > 0) ? describe.skip : describe;
 
-  // Additional gating: require certain env vars; if missing, skip the suite gracefully.
-  const requiredEnv = [
-    "MEMORA_EMBED_PROVIDER",
-    "MEMORA_OS_SEARCH_PIPELINE_NAME",
-    "MEMORA_OS_SEARCH_PIPELINE_BODY_JSON"
-  ] as const;
-  const missing = requiredEnv.filter((k) => !process.env[k]);
-  if (missing.length > 0) {
-    it.skip(`required env not set for search pipeline integration: ${missing.join(", ")}`, () => {
-      // no-op
-    });
-    return;
-  }
-
+suite("os-ml search pipeline integration (INTEGRATION gated)", () => {
   it("smoke: env wiring present for search pipeline JSON body", async () => {
-    // Skeleton: verify expected envs are present when running with INTEGRATION=1.
-    // Actual cluster calls are covered by os-bootstrap path in application runtime;
-    // this test ensures CI/dev can wire the JSON without parse errors.
     // Validate the JSON parses - mirrors ensureSearchPipelineFromEnv parsing path.
     const bodyRaw = process.env.MEMORA_OS_SEARCH_PIPELINE_BODY_JSON!;
     let parsed: any;
