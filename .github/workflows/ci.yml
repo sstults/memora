@@ -42,7 +42,7 @@ jobs:
     needs: unit
     services:
       opensearch:
-        image: opensearchproject/opensearch:2.18.0
+        image: opensearchproject/opensearch:3.2.0
         ports:
           - 9200:9200
         options: >-
@@ -81,9 +81,18 @@ jobs:
             sleep 2
           done
 
+      - name: Create indices from templates
+        env:
+          OS: http://localhost:9200
+          MEMORA_SEMANTIC_INDEX: mem-semantic-384
+          MEMORA_SEMANTIC_ALIAS: mem-semantic
+        run: bash scripts/create_indices.sh
+
       - name: Run Integration Tests
         env:
           INTEGRATION: "1"
           OPENSEARCH_URL: "http://localhost:9200"
           DEBUG: "memora:*"
+          MEMORA_OS_CLIENT_TIMEOUT_MS: "30000"
+          MEMORA_OS_CLIENT_MAX_RETRIES: "5"
         run: npm run test:integration

@@ -1,5 +1,7 @@
 import { Client } from "@opensearch-project/opensearch";
 import { getClient, withRetries } from "./os-client.js";
+import fs from "node:fs";
+import path from "node:path";
 
 /**
  * Utilities for OpenSearch ML Commons + pipelines integration (dev-friendly).
@@ -12,6 +14,38 @@ import { getClient, withRetries } from "./os-client.js";
  *   to be provided when creating the ingest pipeline. Auto-register is intentionally
  *   deferred and guarded behind a future explicit flag.
  */
+
+/** Build dev ML cluster settings (single-node convenience). */
+
+// Model ID cache helpers (dev ergonomics)
+function getModelIdCachePath(): string {
+  const p = process.env.MEMORA_OS_MODEL_ID_CACHE_FILE || ".memora/model_id";
+  return path.resolve(process.cwd(), p);
+}
+
+function readCachedModelId(): string | undefined {
+  try {
+    const p = getModelIdCachePath();
+    if (fs.existsSync(p)) {
+      const v = fs.readFileSync(p, "utf8").trim();
+      return v || undefined;
+    }
+  } catch {
+    // ignore
+  }
+  return undefined;
+}
+
+function writeCachedModelId(id: string): void {
+  try {
+    const p = getModelIdCachePath();
+    const dir = path.dirname(p);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(p, id, "utf8");
+  } catch (e: any) {
+    console.warn(`[memora:os-ml] Failed to write model id cache: ${e?.message || e}`);
+  }
+}
 
 /** Build dev ML cluster settings (single-node convenience). */
 export function buildDevMlSettingsBody() {
@@ -255,6 +289,7 @@ async function ensureModelRegisteredDeployedFromEnv(client: Client): Promise<str
     );
   }
 
+  writeCachedModelId(modelId);
   return modelId;
 }
 
@@ -290,7 +325,7 @@ export async function ensurePipelineAndAttachmentFromEnv(): Promise<void> {
   const semanticIndex = process.env.MEMORA_SEMANTIC_INDEX || "mem-semantic";
 
   // Resolve model id: prefer explicit OPENSEARCH_ML_MODEL_ID; fallback to dev-only auto-register if enabled
-  let modelId = process.env.OPENSEARCH_ML_MODEL_ID;
+  let modelId = process.env.OPENSEARCH_ML_MODEL_ID || readCachedModelId();
   if (!modelId) {
     modelId = await ensureModelRegisteredDeployedFromEnv(client);
   }
