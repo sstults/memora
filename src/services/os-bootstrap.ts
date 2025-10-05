@@ -26,6 +26,7 @@
 import fs from "fs";
 import path from "path";
 import { assertHealthy, ensureIndex, putIndexTemplate } from "./os-client.js";
+import { ensurePipelineAndAttachmentFromEnv } from "./os-ml.js";
 
 export interface BootstrapOptions {
   applyTemplates?: boolean;
@@ -173,4 +174,7 @@ export async function bootstrapOpenSearch(opts: BootstrapOptions = {}): Promise<
       await ensureIndex(episodicToday);
     }
   }
+
+  // 6) Provision ML ingest pipeline and optional default_pipeline attach (no-op unless configured)
+  await ensurePipelineAndAttachmentFromEnv();
 }

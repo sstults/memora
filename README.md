@@ -372,18 +372,26 @@ Environment configuration:
   - OPENSEARCH_ML_MODEL_NAME=huggingface/sentence-transformers/all-MiniLM-L6-v2
   - OPENSEARCH_ML_MODEL_VERSION=1.0.2
   - OPENSEARCH_ML_MODEL_FORMAT=ONNX
+  - OPENSEARCH_ML_MODEL_ID=<your_deployed_model_id>  <!-- required to create/update the ingest pipeline -->
+  - MEMORA_OS_APPLY_DEV_ML_SETTINGS=true|false
 - Pipelines
   - MEMORA_OS_INGEST_PIPELINE_NAME=mem-text-embed
+  - MEMORA_OS_TEXT_SOURCE_FIELD=text
+  - MEMORA_OS_EMBED_FIELD=embedding
   - MEMORA_OS_DEFAULT_PIPELINE_ATTACH=false
 - Vector dim alignment
   - MEMORA_EMBED_DIM should match your model output dimension (MiniLM-L6 ONNX is 384)
   - MEMORA_OS_AUTOFIX_VECTOR_DIM=true can auto-adjust loaded mappings to the expected dimension
 
-Manual steps (until automated in bootstrap):
-1) Register and deploy the model via ML Commons API (ONNX recommended for dev resource usage).
-2) Create an ingest pipeline using the text_embedding processor referencing your deployed model_id.
-3) Optionally attach that ingest pipeline as the default_pipeline for your semantic index.
-4) Ensure your semantic index mapping uses knn_vector with the correct dimension (e.g., 384). You can set MEMORA_OS_AUTOFIX_VECTOR_DIM=true to auto-adjust the loaded body at bootstrap time.
+Bootstrap provisioning:
+- When MEMORA_BOOTSTRAP_OS=1 and MEMORA_EMBED_PROVIDER=opensearch_pipeline, Memora will on startup:
+  - Optionally apply dev ML settings when MEMORA_OS_APPLY_DEV_ML_SETTINGS=true
+  - Create or update the ingest pipeline (MEMORA_OS_INGEST_PIPELINE_NAME) using OPENSEARCH_ML_MODEL_ID, mapping MEMORA_OS_TEXT_SOURCE_FIELD → MEMORA_OS_EMBED_FIELD
+  - Optionally attach that ingest pipeline as the index default_pipeline when MEMORA_OS_DEFAULT_PIPELINE_ATTACH=true
+
+What remains manual:
+1) Register and deploy the model via ML Commons to obtain OPENSEARCH_ML_MODEL_ID (ONNX recommended for dev resource usage).
+2) Ensure your semantic index mapping uses knn_vector with the correct dimension (e.g., 384) or set MEMORA_OS_AUTOFIX_VECTOR_DIM=true to auto-adjust loaded bodies at bootstrap time.
 
 Notes:
 - The text_embedding ingest processor on 3.2 does not support token_limit.
