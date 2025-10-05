@@ -4,7 +4,10 @@ import {
   buildIngestPipelineBody,
   ensureIngestPipeline,
   attachDefaultPipelineToIndex,
-  ensurePipelineAndAttachmentFromEnv
+  ensurePipelineAndAttachmentFromEnv,
+  ensureSearchPipeline,
+  attachDefaultSearchPipelineToIndex,
+  ensureSearchPipelineFromEnv
 } from "../../../src/services/os-ml";
 
 describe("os-ml helpers", () => {
@@ -21,6 +24,10 @@ describe("os-ml helpers", () => {
     delete process.env.MEMORA_OS_DEFAULT_PIPELINE_ATTACH;
     delete process.env.MEMORA_SEMANTIC_INDEX;
     delete process.env.OPENSEARCH_ML_MODEL_ID;
+
+    delete process.env.MEMORA_OS_SEARCH_PIPELINE_NAME;
+    delete process.env.MEMORA_OS_SEARCH_PIPELINE_BODY_JSON;
+    delete process.env.MEMORA_OS_SEARCH_DEFAULT_PIPELINE_ATTACH;
   });
 
   afterEach(() => {
@@ -157,5 +164,79 @@ describe("os-ml helpers", () => {
     expect(warnSpy).toHaveBeenCalledTimes(1);
     const msg = (warnSpy.mock.calls[0]?.[0] || "").toString();
     expect(msg).toMatch(/OPENSEARCH_ML_MODEL_ID is not set/i);
+  });
+
+  // New tests for search pipeline utilities
+
+  it("ensureSearchPipeline calls transport.request with PUT to /_search/pipeline/{id}", async () => {
+    const calls: any[] = [];
+    const fakeClient: any = {
+      transport: {
+        request: vi.fn(async (args: any) => {
+          calls.push(args);
+          return { body: { acknowledged: true } };
+        })
+      }
+    };
+    await ensureSearchPipeline({
+      id: "mem-search",
+      body: { request_processors: [], response_processors: [] },
+      client: fakeClient
+    });
+    expect(fakeClient.transport.request).toHaveBeenCalledTimes(1);
+    expect(calls[0]).toEqual({
+      method: "PUT",
+      path: "/_search/pipeline/mem-search",
+      body: { request_processors: [], response_processors: [] }
+    });
+  });
+
+  it("attachDefaultSearchPipelineToIndex sets index.search.default_pipeline when missing/different", async () => {
+    const putCalls: any[] = [];
+    const fakeClient: any = {
+      indices: {
+        getSettings: vi.fn(async () => ({
+          body: {
+            "mem-semantic": {
+              settings: {
+                index: {
+                  // no search.default_pipeline set
+                }
+              }
+            }
+          }
+        })),
+        putSettings: vi.fn(async (args: any) => {
+          putCalls.push(args);
+          return { body: { acknowledged: true } };
+        })
+      }
+    };
+    await attachDefaultSearchPipelineToIndex({
+      index: "mem-semantic",
+      pipeline: "mem-search",
+      client: fakeClient
+    });
+    expect(fakeClient.indices.getSettings).toHaveBeenCalledTimes(1);
+    expect(fakeClient.indices.putSettings).toHaveBeenCalledTimes(1);
+    expect(putCalls[0]).toEqual({
+      index: "mem-semantic",
+      body: { index: { search: { default_pipeline: "mem-search" } } }
+    });
+  });
+
+  it("ensureSearchPipelineFromEnv is a no-op when provider is not opensearch_pipeline", async () => {
+    process.env.MEMORA_EMBED_PROVIDER = "other_provider";
+    await expect(ensureSearchPipelineFromEnv()).resolves.toBeUndefined();
+  });
+
+  it("ensureSearchPipelineFromEnv warns and returns when MEMORA_OS_SEARCH_PIPELINE_BODY_JSON is not set", async () => {
+    process.env.MEMORA_EMBED_PROVIDER = "opensearch_pipeline";
+    // leave MEMORA_OS_SEARCH_PIPELINE_BODY_JSON undefined
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await ensureSearchPipelineFromEnv();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const msg = (warnSpy.mock.calls[0]?.[0] || "").toString();
+    expect(msg).toMatch(/MEMORA_OS_SEARCH_PIPELINE_BODY_JSON is not set/i);
   });
 });
