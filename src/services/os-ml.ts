@@ -70,6 +70,22 @@ export async function ensureIngestPipeline(opts: {
   );
 }
 
+/** Create or update a search pipeline by id (idempotent). */
+export async function ensureSearchPipeline(opts: {
+  id: string;
+  body: Record<string, any>;
+  client?: Client;
+}): Promise<void> {
+  const client = opts.client || getClient();
+  await withRetries(() =>
+    (client as any).transport.request({
+      method: "PUT",
+      path: `/_search/pipeline/${encodeURIComponent(opts.id)}`,
+      body: opts.body
+    })
+  );
+}
+
 /** Attach index.default_pipeline if not already set to the provided pipeline. */
 export async function attachDefaultPipelineToIndex(opts: {
   index: string;
@@ -99,6 +115,42 @@ export async function attachDefaultPipelineToIndex(opts: {
       body: {
         index: {
           default_pipeline: opts.pipeline
+        }
+      }
+    } as any)
+  );
+}
+
+/** Attach index.search.default_pipeline for search-time pipelines if not already set. */
+export async function attachDefaultSearchPipelineToIndex(opts: {
+  index: string;
+  pipeline: string;
+  client?: Client;
+}): Promise<void> {
+  const client = opts.client || getClient();
+
+  const settingsResp = await withRetries(() =>
+    client.indices.getSettings({ index: opts.index } as any)
+  );
+  const settingsBody: any = (settingsResp as any).body ?? settingsResp;
+
+  let current: string | undefined;
+  if (settingsBody && typeof settingsBody === "object") {
+    const firstKey = Object.keys(settingsBody)[0];
+    const idxSettings = settingsBody[firstKey]?.settings?.index;
+    current =
+      idxSettings?.search?.default_pipeline ??
+      idxSettings?.["search.default_pipeline"];
+  }
+
+  if (current === opts.pipeline) return;
+
+  await withRetries(() =>
+    client.indices.putSettings({
+      index: opts.index,
+      body: {
+        index: {
+          search: { default_pipeline: opts.pipeline }
         }
       }
     } as any)
@@ -156,5 +208,51 @@ export async function ensurePipelineAndAttachmentFromEnv(): Promise<void> {
 
   if (attachDefault) {
     await attachDefaultPipelineToIndex({ index: semanticIndex, pipeline: pipelineName, client });
+  }
+}
+
+/**
+ * Create or update a search pipeline and optionally attach as default to the semantic index.
+ *
+ * Env (commonly set in .env.example):
+ * - MEMORA_EMBED_PROVIDER=opensearch_pipeline
+ * - MEMORA_OS_SEARCH_PIPELINE_NAME=mem-search
+ * - MEMORA_OS_SEARCH_PIPELINE_BODY_JSON='{"request_processors":[...],"response_processors":[...]}'
+ * - MEMORA_OS_SEARCH_DEFAULT_PIPELINE_ATTACH=true|false
+ * - MEMORA_SEMANTIC_INDEX=mem-semantic
+ */
+export async function ensureSearchPipelineFromEnv(): Promise<void> {
+  const provider = (process.env.MEMORA_EMBED_PROVIDER || "").toLowerCase();
+  if (provider !== "opensearch_pipeline") return;
+
+  const name = process.env.MEMORA_OS_SEARCH_PIPELINE_NAME || "mem-search";
+  const bodyJson = process.env.MEMORA_OS_SEARCH_PIPELINE_BODY_JSON;
+
+  if (!bodyJson) {
+    console.warn(
+      "[memora:os-ml] MEMORA_OS_SEARCH_PIPELINE_BODY_JSON is not set. " +
+        "Skipping search pipeline creation. See OpenSearch docs for search processors."
+    );
+    return;
+  }
+
+  let body: any;
+  try {
+    body = JSON.parse(bodyJson);
+  } catch (e: any) {
+    console.warn(
+      `[memora:os-ml] Failed to parse MEMORA_OS_SEARCH_PIPELINE_BODY_JSON: ${e?.message || e}. Skipping.`
+    );
+    return;
+  }
+
+  const client = getClient();
+  await ensureSearchPipeline({ id: name, body, client });
+
+  const attachDefault =
+    (process.env.MEMORA_OS_SEARCH_DEFAULT_PIPELINE_ATTACH || "false").toLowerCase() === "true";
+  const semanticIndex = process.env.MEMORA_SEMANTIC_INDEX || "mem-semantic";
+  if (attachDefault) {
+    await attachDefaultSearchPipelineToIndex({ index: semanticIndex, pipeline: name, client });
   }
 }

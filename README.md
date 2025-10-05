@@ -395,7 +395,7 @@ What remains manual:
 
 Notes:
 - The text_embedding ingest processor on 3.2 does not support token_limit.
-- A search-time pipeline (ml-inference request) to embed queries server-side is planned next.
+- A search-time pipeline is available to embed queries server-side using search processors. Configure MEMORA_OS_SEARCH_PIPELINE_NAME, MEMORA_OS_SEARCH_PIPELINE_BODY_JSON, and set MEMORA_OS_SEARCH_DEFAULT_PIPELINE_ATTACH=true to attach as the index.search.default_pipeline. See .env.example for examples and the OpenSearch docs for processor shapes.
 
 ## Release (GitHub-only)
 
