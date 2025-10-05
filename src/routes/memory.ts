@@ -375,8 +375,7 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
   const must = [{
     simple_query_string: {
       query: q.objective,
-      fields: ["content^3", "tags", "artifacts"],
-      default_operator: "or"
+      fields: ["content^3", "tags", "artifacts"]
     }
   }];
 
@@ -475,8 +474,7 @@ async function semanticSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
           must: [{
             simple_query_string: {
               query: q.objective,
-              fields: ["text^2", "title", "tags"],
-              default_operator: "or"
+              fields: ["text^2", "title", "tags"]
             }
           }],
           filter: bf.bool.filter,
