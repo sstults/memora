@@ -41,6 +41,14 @@ fi
 
 mkdir -p "$(dirname "$out")"
 
+# Logging configuration
+LOG_DIR="benchmarks/logs"
+mkdir -p "${LOG_DIR}"
+LOG_PREFIX="longmemeval.${variant}.${seed}"
+DRIVER_LOG="${LOG_DIR}/${LOG_PREFIX}.driver.log"
+SCORE_LOG="${LOG_DIR}/${LOG_PREFIX}.score.log"
+AGG_LOG="${LOG_DIR}/${LOG_PREFIX}.aggregate.log"
+
 # Ensure ts-node registration is available for TS runners in this repo
 NODE_RUNNER="node --import ./scripts/register-ts-node.mjs"
 
@@ -68,21 +76,24 @@ echo "Output=${out}"
 # Build the project to ensure dist/ exists for compiled MCP server used by the driver
 npm run build
 
+echo "Running driver (logs: ${DRIVER_LOG})"
 $NODE_RUNNER benchmarks/runners/longmemeval_driver.ts \
   --dataset "${dataset}" \
   --out "${out}" \
   --variant "${variant}" \
-  --seed "${seed}"
+  --seed "${seed}" >> "${DRIVER_LOG}" 2>&1
 
 echo "=== LongMemEval: Score ==="
+echo "Scoring predictions (logs: ${SCORE_LOG})"
 $NODE_RUNNER benchmarks/runners/score_longmemeval.ts \
   --hyp "${out}" \
   --dataset "${dataset}" \
-  --tag "${tag}"
+  --tag "${tag}" >> "${SCORE_LOG}" 2>&1
 
 echo "=== LongMemEval: Aggregate ==="
+echo "Aggregating metrics (logs: ${AGG_LOG})"
 $NODE_RUNNER benchmarks/runners/aggregate_longmemeval.ts \
-  --in "${out}"
+  --in "${out}" >> "${AGG_LOG}" 2>&1
 
 echo "=== Done ==="
 echo "Predictions: ${out}"
