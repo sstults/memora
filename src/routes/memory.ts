@@ -233,7 +233,7 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
     api_version: q.filters?.api_version ?? active.api_version,
     env: q.filters?.env ?? active.env,
     exclude_tags: getPolicyArray("filters.exclude_tags", ["secret", "sensitive"]),
-    recent_days: getPolicy("stages.episodic.recent_days", 30)
+    recent_days: getPolicy("stages.episodic.filters.recent_days", 30)
   };
 
   // Stage A: Episodic (BM25 / match)

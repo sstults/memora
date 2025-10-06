@@ -481,16 +481,15 @@ async function main() {
       const question = extractQuestion(ex);
 
       try {
-        await replaySessionsToMemora(adapter, seed, variant, qid, sessions, "write");
+        await replaySessionsToMemora(adapter, seed, variant, qid, sessions, "salient");
       } catch (err: any) {
         writeJSONL(out, { ts: new Date().toISOString(), op: "warn", stage: "replay_sessions", qid, error: String(err?.message ?? err) });
       }
 
       // Retrieve memory context for the question with expanded budget and tags
       try {
-        const filtersC: { scope: Scope[]; tags: string[] } = {
-          scope: ["this_task", "project"],
-          tags: ["bench", "longmemeval", `seed:${seed}`, `variant:${variant}`]
+        const filtersC: { scope: Scope[] } = {
+          scope: ["this_task", "project"]
         };
         await adapter.search(question || "question", 20, filtersC, { task_id: `longmemeval-${seed}` });
       } catch {
@@ -503,9 +502,8 @@ async function main() {
       let llm_latency_ms: number | null = null;
       try {
         const kC = 20;
-        const filtersC: { scope: Scope[]; tags: string[] } = {
-          scope: ["this_task", "project"],
-          tags: ["bench", "longmemeval", `seed:${seed}`, `variant:${variant}`]
+        const filtersC: { scope: Scope[] } = {
+          scope: ["this_task", "project"]
         };
         const recentText = buildRecentTurnsText(sessions);
         const pack = await adapter.pack(
