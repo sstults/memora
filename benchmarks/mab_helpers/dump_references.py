@@ -17,6 +17,7 @@ Dump MemoryAgentBench references (questions/answers) from Hugging Face to JSON.
 """
 import sys
 import json
+import os
 import fnmatch
 from argparse import ArgumentParser
 
@@ -66,10 +67,19 @@ def main():
   ap.add_argument("--huggingface_dataset_name", default="ai-hyz/MemoryAgentBench", help="HF dataset name")
   ap.add_argument("--split", default="Accurate_Retrieval", help="Dataset split to load")
   ap.add_argument("--source", default="longmemeval_s*", help="Wildcard pattern for metadata.source")
+  ap.add_argument("--out", default="", help="Optional path to write JSON instead of stdout")
   args = ap.parse_args()
 
   refs = load_references(args.huggingface_dataset_name, args.split, args.source)
-  sys.stdout.write(json.dumps(refs, ensure_ascii=False))
+  payload = json.dumps(refs, ensure_ascii=False)
+  if args.out:
+    out_dir = os.path.dirname(args.out)
+    if out_dir:
+      os.makedirs(out_dir, exist_ok=True)
+    with open(args.out, "w", encoding="utf-8") as f:
+      f.write(payload)
+  else:
+    sys.stdout.write(payload)
 
 if __name__ == "__main__":
   main()

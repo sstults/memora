@@ -137,16 +137,23 @@ function sha256(s: string): string {
 
 
 function dumpReferences(source: string, split: Split): Reference[] {
+  // Write large JSON to a file to avoid ENOBUFS on stdout
+  const cacheDir = path.join("outputs", "mab_cache");
+  fs.mkdirSync(cacheDir, { recursive: true });
+  const tagSafe = source.replace(/\*/g, "x");
+  const outFile = path.join(cacheDir, `${split}.${tagSafe}.refs.json`);
   const args = [
     "benchmarks/mab_helpers/dump_references.py",
     "--source",
     source,
     "--split",
-    split
+    split,
+    "--out",
+    outFile
   ];
-  // Allow large JSON payloads from the HF datasets loader to avoid ENOBUFS
-  const out = execFileSync("python3", args, { encoding: "utf8", maxBuffer: 1024 * 1024 * 64 });
-  const data = JSON.parse(out) as Reference[];
+  execFileSync("python3", args, { encoding: "utf8", maxBuffer: 1024 * 1024 * 4 });
+  const raw = fs.readFileSync(outFile, "utf8");
+  const data = JSON.parse(raw) as Reference[];
   return data;
 }
 
