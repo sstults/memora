@@ -119,3 +119,52 @@ Next steps
 - Aggregate results into CSV/Markdown and generate frontier plots (Accuracy vs p95Latency).
 - Implement baseline B using a simple vector index (OpenSearch kNN or lightweight local embedding index).
 - Add seed matrices and variant switching in the driver (A/B/C) with consolidated JSONL outputs.
+
+---
+
+MemoryAgentBench (MAB) integration
+
+This repository includes a pluggable runner for MemoryAgentBench (Accurate_Retrieval split), producing predictions JSON compatible with the upstream evaluator and a local OpenAI-judge scorer.
+
+Files:
+- mab_helpers/dump_references.py — Python helper to load references from HuggingFace (ai-hyz/MemoryAgentBench), filter by split/source, and emit [{question, answer, question_id, question_type, context, source, abstention}].
+- runners/mab_driver.ts — TypeScript driver that:
+  - Dumps references via the helper
+  - Writes each unique long context into Memora (salience-aware)
+  - Packs and answers each question with an LLM (or emits empty answers if no OPENAI_API_KEY)
+  - Writes predictions to outputs/memora/{split}/{source}_SEED{seed}.json with shape:
+    { "data": [ {question_id, question, output, answer, ...} ], "meta": {...} }
+- runners/score_mab.ts — TypeScript scorer that:
+  - Reloads references
+  - Prompts an OpenAI judge (default gpt-4o) with task-specific rubric to grade yes/no
+  - Writes results to outputs/memora/{split}/.eval-results-memora-{fileTag} (JSONL)
+- runners/run_memoryagentbench.sh — Shell wrapper to build, run the driver, and (optionally) score.
+
+Prereqs:
+- Node 20+
+- Python 3.10+ with pip install datasets
+- OPENAI_API_KEY (only required for scoring or for non-empty answers)
+
+NPM scripts:
+- Build only:
+  npm run build
+- Driver (defaults: source 'longmemeval_s*', split Accurate_Retrieval, seed 42):
+  npm run bench:mab:driver
+- Scorer (uses OpenAI judge gpt-4o by default):
+  npm run bench:mab:score
+- End-to-end (build + driver + scorer):
+  npm run bench:mab:smoke
+
+Direct shell:
+- End-to-end with optional limit for quick smoke:
+  bash benchmarks/runners/run_memoryagentbench.sh --source 'longmemeval_s*' --split Accurate_Retrieval --seed 42 --limit 10
+  # If OPENAI_API_KEY is not set, the scorer step is skipped.
+
+Outputs:
+- Predictions JSON: outputs/memora/Accurate_Retrieval/longmemeval_s*_SEED42.json
+- Eval results (JSONL): outputs/memora/Accurate_Retrieval/.eval-results-memora-longmemeval_s*_SEED42
+- Logs: benchmarks/logs/
+
+Notes:
+- The driver reuses Memora MCP tools via MemoryAdapter and packing.yaml to build a compact retrieval context.
+- With no OPENAI_API_KEY, predictions contain empty output; this is still useful to verify plumbing and reference alignment.
