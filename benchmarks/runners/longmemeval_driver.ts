@@ -13,7 +13,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 
 // MemoryAdapter and MCP SDK (ESM paths)
-import MemoryAdapter, { McpClient } from "../adapters/memora_adapter.js";
+import MemoryAdapter, { McpClient, type Scope } from "../adapters/memora_adapter.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 /* OpenAI import deferred to runtime to avoid loader-time issues */
@@ -158,6 +158,13 @@ function buildSlidingWindowContext(sessions: Turn[][], windowTurns: number): str
   return `Recent context (sliding window ${windowTurns}):\n` + lines.join("\n");
 }
 
+// Build a recent_turns text block delimited for packer trimming
+function buildRecentTurnsText(sessions: Turn[][]): string {
+  const texts = flattenSessions(sessions);
+  if (texts.length === 0) return "";
+  return texts.join("\n---TURN---\n");
+}
+
 // Simple vector ops for baseline B
 type Vec = number[];
 
@@ -260,18 +267,38 @@ Answer:`;
   return { text: (text ?? "").toString().trim(), usage: resp?.usage, latency_ms };
 }
 
-async function replaySessionsToMemora(adapter: MemoryAdapter, seed: number, variant: Variant, qid: string, sessions: Turn[][]) {
+async function replaySessionsToMemora(
+  adapter: MemoryAdapter,
+  seed: number,
+  variant: Variant,
+  qid: string,
+  sessions: Turn[][],
+  mode: "write" | "salient" = "salient"
+) {
   for (const [sIdx, session] of sessions.entries()) {
     for (const [tIdx, turn] of session.entries()) {
       const text = (turn.content ?? turn.text ?? "").toString();
       if (!text || !text.trim()) continue;
       try {
-        await adapter.writeIfSalient({
-          text,
+        const common = {
           tags: ["bench", "longmemeval", `seed:${seed}`, `variant:${variant}`, `qid:${qid}`, `session:${sIdx}`, `turn:${tIdx}`],
-          scope: "this_task",
+          scope: "this_task" as const,
           task_id: `longmemeval-${seed}`
-        });
+        };
+        if (mode === "write") {
+          await adapter.write({
+            text,
+            ...common
+          });
+        } else {
+          await adapter.writeIfSalient(
+            {
+              text,
+              ...common
+            },
+            0.05 // low threshold to maximize recall
+          );
+        }
       } catch {
         // Non-fatal for bench driver
       }
@@ -453,14 +480,18 @@ async function main() {
       const question = extractQuestion(ex);
 
       try {
-        await replaySessionsToMemora(adapter, seed, variant, qid, sessions);
+        await replaySessionsToMemora(adapter, seed, variant, qid, sessions, "write");
       } catch (err: any) {
         writeJSONL(out, { ts: new Date().toISOString(), op: "warn", stage: "replay_sessions", qid, error: String(err?.message ?? err) });
       }
 
-      // Retrieve memory context for the question (k=5); a later step will use an LLM over packed context.
+      // Retrieve memory context for the question with expanded budget and tags
       try {
-        await adapter.search(question || "question", 5, { scope: ["this_task", "project"] }, { task_id: `longmemeval-${seed}` });
+        const filtersC: { scope: Scope[]; tags: string[] } = {
+          scope: ["this_task", "project"],
+          tags: ["bench", "longmemeval", `seed:${seed}`, `variant:${variant}`]
+        };
+        await adapter.search(question || "question", 20, filtersC, { task_id: `longmemeval-${seed}` });
       } catch {
         // retrieval failures are non-fatal for emitting a stub prediction
       }
@@ -470,11 +501,17 @@ async function main() {
       let tokens_out: number | null = null;
       let llm_latency_ms: number | null = null;
       try {
+        const kC = 20;
+        const filtersC: { scope: Scope[]; tags: string[] } = {
+          scope: ["this_task", "project"],
+          tags: ["bench", "longmemeval", `seed:${seed}`, `variant:${variant}`]
+        };
+        const recentText = buildRecentTurnsText(sessions);
         const pack = await adapter.pack(
           question || "question",
-          (memoraCfg?.retrieval_budget ?? 8),
-          undefined,
-          memoraCfg?.filters,
+          kC,
+          { recent_turns: recentText },
+          filtersC,
           { task_id: `longmemeval-${seed}` }
         );
         const contextText = pack?.data?.packed ?? "";

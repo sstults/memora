@@ -27,9 +27,9 @@ limits:
 compression:
   # Apply compression if section exceeds its budget.
   retrieved:
-    enabled: true
+    enabled: false
     min_tokens: 200        # Compress only if snippet > 200 tokens
     preserve_anchors: true # Keep file paths, IDs, error codes intact
   recent_turns:
     enabled: true
-    max_turns: 10          # Keep only last 10 turns if over budget
+    max_turns: 20          # Keep only last 20 turns if over budget
