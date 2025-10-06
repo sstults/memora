@@ -44,10 +44,30 @@ mkdir -p "$(dirname "$out")"
 # Ensure ts-node registration is available for TS runners in this repo
 NODE_RUNNER="node --import ./scripts/register-ts-node.mjs"
 
+# Configure Memora for accurate retrieval when running Variant C:
+# - Use OpenSearch ML ingest pipeline for embeddings (replaces local fallback)
+# - Attach ingest pipeline as index default (ensures embeddings computed on write)
+# - Enable reranker (falls back to lexical if remote rerank is not configured)
+# - Align embedding dimension with index mapping (384)
+# - Point client to local OpenSearch started via docker-compose
+if [[ "${variant}" == "C" ]]; then
+  export MEMORA_BOOTSTRAP_OS=1
+  export MEMORA_EMBED_PROVIDER=opensearch_pipeline
+  export MEMORA_OS_DEFAULT_PIPELINE_ATTACH=true
+  export MEMORA_OS_AUTO_REGISTER_MODEL="${MEMORA_OS_AUTO_REGISTER_MODEL:-true}"
+  export MEMORA_RERANK_ENABLED="${MEMORA_RERANK_ENABLED:-true}"
+  export MEMORA_SEMANTIC_INDEX="${MEMORA_SEMANTIC_INDEX:-mem-semantic}"
+  export MEMORA_EMBED_DIM="${MEMORA_EMBED_DIM:-384}"
+  export OPENSEARCH_URL="${OPENSEARCH_URL:-http://localhost:19200}"
+fi
+
 echo "=== LongMemEval: Driver ==="
 echo "Variant=${variant} Seed=${seed}"
 echo "Dataset=${dataset}"
 echo "Output=${out}"
+# Build the project to ensure dist/ exists for compiled MCP server used by the driver
+npm run build
+
 $NODE_RUNNER benchmarks/runners/longmemeval_driver.ts \
   --dataset "${dataset}" \
   --out "${out}" \

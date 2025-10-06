@@ -31,6 +31,7 @@ const EPISODIC_PREFIX = process.env.MEMORA_EPI_PREFIX || "mem-episodic-";
 
 const DEFAULT_BUDGET = Number(process.env.MEMORA_DEFAULT_BUDGET || 12);
 const RERANK_ENABLED = process.env.MEMORA_RERANK_ENABLED === "true";
+const USE_OS_PIPELINE = (process.env.MEMORA_EMBED_PROVIDER || "").toLowerCase() === "opensearch_pipeline";
 const log = debug("memora:memory");
 
 // Idempotency and backpressure knobs
@@ -139,7 +140,7 @@ async function handleWrite(req: any) {
     }
     // (b) semantic chunk
     const text = summarizeIfLong(a, getPolicy("salience.max_chunk_tokens", 800));
-    const vec = await embed(text); // local or remote embedder
+    const vec = USE_OS_PIPELINE ? undefined : await embed(text); // if using OS ingest pipeline, let it embed
     const mem_id = uuidv4();
     chunks.push({
       mem_id,

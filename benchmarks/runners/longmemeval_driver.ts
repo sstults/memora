@@ -412,9 +412,10 @@ async function main() {
       Object.entries(process.env).filter(([, v]) => v !== undefined)
     ) as Record<string, string>;
 
+    // Launch compiled MCP server to avoid ts-node ESM loader issues
     transport = new StdioClientTransport({
       command: "node",
-      args: ["--import", "./scripts/register-ts-node.mjs", "src/index.ts"],
+      args: ["--experimental-specifier-resolution=node", "dist/src/index.js"],
       cwd: process.cwd(),
       env
     });

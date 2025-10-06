@@ -1,14 +1,45 @@
-// src/services/embedder.ts
-// Minimal embedding client with a deterministic local fallback.
-// - If EMBEDDING_ENDPOINT is set, POSTs {texts, dim} and expects {vectors: number[][]}.
-// - Otherwise, uses a hash-based fallback to produce stable pseudo-embeddings.
-// Vectors are L2-normalized.
+/* src/services/embedder.ts
+   Minimal embedding client with a deterministic local fallback.
+   - If EMBEDDING_ENDPOINT is set, POSTs {texts, dim} and expects {vectors: number[][]}.
+   - Otherwise, uses a hash-based fallback to produce stable pseudo-embeddings.
+   Vectors are L2-normalized.
+*/
+
+import fs from "node:fs";
+import path from "node:path";
 
 const ENDPOINT = process.env.EMBEDDING_ENDPOINT; // e.g., http://localhost:8080/embed
 const API_KEY = process.env.EMBEDDING_API_KEY || "";
 const DIM = Number(process.env.MEMORA_EMBED_DIM || 384);
 const TIMEOUT_MS = Number(process.env.MEMORA_EMBED_TIMEOUT_MS || 8000);
 const MAX_RETRIES = Number(process.env.MEMORA_EMBED_RETRIES || 3);
+const PROVIDER = (process.env.MEMORA_EMBED_PROVIDER || "").toLowerCase();
+const OS_URL = process.env.OPENSEARCH_URL || "http://localhost:19200";
+
+// Resolve OpenSearch ML model id from env or cache file (written by os-ml.ts)
+function getModelIdCachePath(): string {
+  const p = process.env.MEMORA_OS_MODEL_ID_CACHE_FILE || ".memora/model_id";
+  try {
+    return path.resolve(process.cwd(), p);
+  } catch {
+    return p;
+  }
+}
+function readCachedModelId(): string | undefined {
+  try {
+    const p = getModelIdCachePath();
+    if (fs.existsSync(p)) {
+      const v = fs.readFileSync(p, "utf8").trim();
+      return v || undefined;
+    }
+  } catch {
+    // ignore
+  }
+  return undefined;
+}
+function resolveOsModelId(): string | undefined {
+  return process.env.OPENSEARCH_ML_MODEL_ID || readCachedModelId();
+}
 
 export async function embed(text: string, dim: number = DIM): Promise<number[]> {
   const [v] = await embedBatch([text], dim);
@@ -17,18 +48,98 @@ export async function embed(text: string, dim: number = DIM): Promise<number[]> 
 
 export async function embedBatch(texts: string[], dim: number = DIM): Promise<number[][]> {
   if (!texts || texts.length === 0) return [];
+
+  // If using OpenSearch ML ingest pipeline for document embeddings, align query embeddings by calling ML _infer.
+  const modelId = resolveOsModelId();
+  if (PROVIDER === "opensearch_pipeline" && modelId) {
+    try {
+      const vecs = await (async function osMlInferBatch(input: string[], expectedDim: number): Promise<number[][]> {
+        // Try two endpoints for compatibility across OS ML versions
+        const payload = JSON.stringify({ model_id: modelId, input });
+        const tryEndpoints = [
+          `${OS_URL.replace(/\/+$/, "")}/_plugins/_ml/_infer`,
+          `${OS_URL.replace(/\/+$/, "")}/_plugins/_ml/models/${encodeURIComponent(modelId)}/_infer`
+        ];
+
+        let lastErr: any;
+        for (const ep of tryEndpoints) {
+          try {
+            const ctrl = new AbortController();
+            const to = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+            const res = await fetch(ep, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: payload,
+              signal: ctrl.signal
+            }).finally(() => clearTimeout(to));
+            if (!res.ok) {
+              const txt = await res.text();
+              throw new Error(`HTTP ${res.status}: ${txt.slice(0, 200)}`);
+            }
+            const body: any = await res.json();
+
+            // Parse common response shapes
+            let vectors: number[][] | undefined;
+
+            // 1) { inference_results: [{ output: [[...]] }]} or output: [...]
+            if (Array.isArray(body?.inference_results)) {
+              const outs = body.inference_results.map((r: any) => {
+                if (Array.isArray(r?.output)) {
+                  // Some versions return [[...]]; accept both shapes
+                  if (Array.isArray(r.output[0]) && typeof r.output[0][0] === "number") return r.output[0];
+                  if (typeof r.output[0] === "number") return r.output as number[];
+                }
+                if (Array.isArray(r?.predicted_value)) return r.predicted_value as number[];
+                return undefined;
+              });
+              if (outs.every((v: any) => Array.isArray(v))) {
+                vectors = outs as number[][];
+              }
+            }
+
+            // 2) { results: [[...], [...]] }
+            if (!vectors && Array.isArray(body?.results) && Array.isArray(body.results[0])) {
+              vectors = body.results as number[][];
+            }
+
+            if (!vectors || vectors.length !== input.length) {
+              throw new Error("Malformed ML infer response: missing vectors or count mismatch");
+            }
+            // Basic dim check
+            for (const v of vectors) {
+              if (!Array.isArray(v) || (expectedDim > 0 && v.length !== expectedDim)) {
+                // Do not hard-fail if dim mismatches; continue with whatever was returned
+                break;
+              }
+            }
+            return vectors;
+          } catch (err) {
+            lastErr = err;
+            // try next endpoint
+          }
+        }
+        throw new Error(`OS ML infer failed: ${String(lastErr)}`);
+      })(texts, dim);
+      return vecs.map(unitNormalize);
+    } catch (e) {
+      console.warn(`[embedder] OpenSearch ML infer failed, falling back. Reason: ${(e as Error).message}`);
+      // Fall through to other providers/endpoints
+    }
+  }
+
+  // If a custom HTTP endpoint is configured, use it.
   if (ENDPOINT) {
     try {
       const vecs = await remoteEmbed(texts, dim);
       return vecs.map(unitNormalize);
     } catch (e) {
-      // Fall through to local fallback if remote fails
       console.warn(`[embedder] remote endpoint failed, using fallback. Reason: ${(e as Error).message}`);
       return texts.map(t => unitNormalize(localFallbackEmbedding(t, dim)));
     }
-  } else {
-    return texts.map(t => unitNormalize(localFallbackEmbedding(t, dim)));
   }
+
+  // Deterministic local pseudo-embeddings (dev only)
+  return texts.map(t => unitNormalize(localFallbackEmbedding(t, dim)));
 }
 
 // ---------------------------

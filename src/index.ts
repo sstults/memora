@@ -14,9 +14,14 @@ async function main() {
   registerEval(server);
   registerPack(server);
 
-  // Optionally bootstrap OpenSearch if enabled
+  // Optionally bootstrap OpenSearch if enabled (best-effort; do not crash MCP)
   if ((process.env.MEMORA_BOOTSTRAP_OS || "") === "1" || (process.env.MEMORA_BOOTSTRAP_OS || "").toLowerCase() === "true") {
-    await bootstrapOpenSearch();
+    try {
+      await bootstrapOpenSearch();
+    } catch (err) {
+      console.error("bootstrapOpenSearch failed (continuing to serve MCP):", err);
+      // Continue serving MCP even if bootstrap fails; routes will handle OS unavailability.
+    }
   }
 
   // Dynamically import stdio transport from SDK ESM dist to satisfy TS resolver
