@@ -560,14 +560,10 @@ async function touchLastUsed(memIds: string[]) {
    return `${safe(ctxIds.tenant_id)}:${safe(ctxIds.project_id)}:${safe(ctxIds.context_id)}:${safe(ctxIds.task_id)}:${safe(key)}`;
  }
  function buildSemanticQueryText(q: RetrievalQuery): string {
-  const bits = [
-    q.objective,
-    q.task_id ? `task:${q.task_id}` : "",
-    q.env ? `env:${q.env}` : "",
-    q.api_version ? `api:${q.api_version}` : "",
-    (q.filters?.tags || []).map(t => `tag:${t}`).join(" ")
-  ].filter(Boolean);
-  return bits.join(" ");
+  // IMPORTANT: For semantic query embedding, use only the natural-language objective.
+  // All metadata constraints (scope/tags/env/api_version) are applied via filters, not the embedding.
+  // Including tags/identifiers in the embed text pollutes the semantic signal and hurts retrieval accuracy.
+  return String(q.objective ?? "");
 }
 
 function deriveTitle(text: string): string {
