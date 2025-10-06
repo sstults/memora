@@ -144,7 +144,8 @@ function dumpReferences(source: string, split: Split): Reference[] {
     "--split",
     split
   ];
-  const out = execFileSync("python3", args, { encoding: "utf8" });
+  // Allow large JSON payloads from the HF datasets loader to avoid ENOBUFS
+  const out = execFileSync("python3", args, { encoding: "utf8", maxBuffer: 1024 * 1024 * 64 });
   const data = JSON.parse(out) as Reference[];
   return data;
 }
