@@ -94,13 +94,17 @@ function ensureDirForFile(filePath: string) {
 }
 
 function dumpReferences(source: string, split: Split): Reference[] {
-  const out = execFileSync(
+  // Avoid ENOBUFS by writing Python output to a file and reading it back
+  const tagSafe = source.replace(/\*/g, "x");
+  const outPath = path.join("outputs", "memora", split, `.refs-${tagSafe}.json`);
+  ensureDirForFile(outPath);
+  execFileSync(
     "python3",
-    ["benchmarks/mab_helpers/dump_references.py", "--source", source, "--split", split],
+    ["benchmarks/mab_helpers/dump_references.py", "--source", source, "--split", split, "--out", outPath],
     { encoding: "utf8" }
   );
-  const refs = JSON.parse(out) as Reference[];
-  // Basic sanity
+  const json = fs.readFileSync(outPath, "utf8");
+  const refs = JSON.parse(json) as Reference[];
   if (!Array.isArray(refs) || refs.length === 0) {
     throw new Error("No references returned from HF dataset dump");
   }
