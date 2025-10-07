@@ -32,7 +32,10 @@
     "bench:longmem:smoke": "npm run bench:longmem:driver && npm run bench:longmem:score",
     "bench:mab:driver": "node --import ./scripts/register-ts-node.mjs benchmarks/runners/mab_driver.ts --source 'longmemeval_s*' --split Accurate_Retrieval --seed 42",
     "bench:mab:score": "node --import ./scripts/register-ts-node.mjs benchmarks/runners/score_mab.ts --method memora --source 'longmemeval_s*' --split Accurate_Retrieval --seed 42 --judge gpt-4o",
-    "bench:mab:smoke": "npm run build && npm run bench:mab:driver && npm run bench:mab:score"
+    "bench:mab:smoke": "npm run build && npm run bench:mab:driver && npm run bench:mab:score",
+    "bench:locomo:driver": "node --import ./scripts/register-ts-node.mjs benchmarks/runners/locomo_driver.ts",
+    "bench:locomo:score": "node --import ./scripts/register-ts-node.mjs benchmarks/runners/score_locomo.ts",
+    "bench:locomo:run": "bash benchmarks/runners/run_locomo.sh"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.19.1",
