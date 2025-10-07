@@ -35,6 +35,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Load .env from repo root if present (export variables to subprocesses)
+if [[ -f ".env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source ./.env
+  set +a
+fi
+
 # Derived paths
 PRED_DIR="outputs/memora/${split}"
 PRED_FILE="${PRED_DIR}/${source_pattern}_SEED${seed}.json"

@@ -35,6 +35,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Load .env from repo root if present (export variables to subprocesses)
+if [[ -f ".env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source ./.env
+  set +a
+fi
+
 if [[ -z "${out}" ]]; then
   out="benchmarks/reports/longmemeval.${variant}.${seed}.jsonl"
 fi

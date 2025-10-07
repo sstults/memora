@@ -1,0 +1,12 @@
+# Python venvs and caches for benchmarks
+.venvs/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+.build/
+dist/
+.DS_Store
