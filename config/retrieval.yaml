@@ -4,15 +4,15 @@
 stages:
   episodic:
     enabled: true
-    top_k: 50
+    top_k: 25
     query_type: bm25         # BM25 or match
     filters:
       default_scope: ["this_task", "project"]
       recent_days: 30        # limit episodic recall to recent N days
   semantic:
     enabled: true
-    top_k: 100
-    ann_candidates: 400
+    top_k: 50
+    ann_candidates: 200
     metric: cosine
     filters:
       default_scope: ["this_task", "project"]
@@ -23,8 +23,8 @@ stages:
     top_k: 40
 
 fusion:
-  method: rrf                # reciprocal rank fusion
-  rrf_k: 30
+  method: rrf
+  rrf_k: 60
   normalize_scores: true
 
 rerank:

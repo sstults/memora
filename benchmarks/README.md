@@ -168,3 +168,55 @@ Outputs:
 Notes:
 - The driver reuses Memora MCP tools via MemoryAdapter and packing.yaml to build a compact retrieval context.
 - With no OPENAI_API_KEY, predictions contain empty output; this is still useful to verify plumbing and reference alignment.
+
+---
+
+LoCoMo integration
+
+This repository includes a pluggable runner for LoCoMo-style long-context QA, producing predictions JSON and an OpenAI-judge scored log similar to MemoryAgentBench. It supports loading references from either a HuggingFace dataset or a local JSON file.
+
+Files:
+- locomo_helpers/dump_references.py — Python helper to load references (HF dataset via `datasets` or a local JSON file) and emit a normalized array:
+  [{question, answer, question_id, question_type?, context, source?, abstention?}]
+- runners/locomo_driver.ts — TypeScript driver that:
+  - Dumps references via the helper (HF or local JSON)
+  - Writes each unique long context into Memora (salience-aware)
+  - Packs and answers each question with an LLM (or emits empty answers if no OPENAI_API_KEY)
+  - Writes predictions to outputs/memora/LoCoMo/<tag>_SEED{seed}.json with shape:
+    { "data": [ {question_id, question, output, answer, ...} ], "meta": { dataset_id?, from_file?, split, seed, ... } }
+- runners/score_locomo.ts — TypeScript scorer that:
+  - Reloads references (HF or local JSON) using the same helper
+  - Prompts an OpenAI judge (default gpt-4o) with a generic QA rubric to grade yes/no
+  - Writes results to outputs/memora/LoCoMo/.eval-results-memora-{fileTag} (JSONL)
+- runners/run_locomo.sh — Shell wrapper to build, run the driver, and (optionally) score.
+
+Prereqs:
+- Node 20+
+- Python 3.10+ with `pip install datasets` (only required for HF dataset usage)
+- OPENAI_API_KEY (only required for scoring or for non-empty answers)
+
+NPM scripts:
+- Build only:
+  npm run build
+- Driver (reads HF dataset or local file; set flags accordingly):
+  npm run bench:locomo:driver
+- Scorer (uses OpenAI judge gpt-4o by default):
+  npm run bench:locomo:score
+- End-to-end (build + driver + optional scoring via environment):
+  npm run bench:locomo:run
+
+Direct shell usage:
+- End-to-end with HF dataset:
+  bash benchmarks/runners/run_locomo.sh --dataset_id some_org/LoCoMo --split test --seed 42 --limit 10
+- End-to-end with local JSON:
+  bash benchmarks/runners/run_locomo.sh --from_file path/to/locomo.json --split test --seed 42 --limit 10
+  # If OPENAI_API_KEY is not set, the scorer step is skipped.
+
+Outputs:
+- Predictions JSON: outputs/memora/LoCoMo/<tag>_SEED42.json
+- Eval results (JSONL): outputs/memora/LoCoMo/.eval-results-memora-<fileTag>
+- Logs: benchmarks/logs/
+
+Notes:
+- The LoCoMo driver reuses Memora MCP tools via MemoryAdapter and packing.yaml to build a compact retrieval context.
+- When no OPENAI_API_KEY is available, predictions contain empty `output`; this is still useful to verify plumbing and reference alignment.

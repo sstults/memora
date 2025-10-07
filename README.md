@@ -150,6 +150,38 @@ export RERANK_ENDPOINT=http://localhost:8081/rerank
 export MEMORA_EVAL_EPISODIC_MIRROR=true
 ```
 
+## OpenSearch ML Cross-Encoder Rerank (optional)
+
+Memora can call an OpenSearch ML Commons cross-encoder model to rerank fused retrieval candidates directly in your cluster.
+
+Requirements:
+- OpenSearch 3.2+ with ML Commons
+- A reranker model registered and deployed in ML Commons (e.g., a cross-encoder/reranker ONNX)
+- The deployed `model_id`
+
+Enable:
+- Set `MEMORA_RERANK_ENABLED=true`
+- Set `OPENSEARCH_ML_RERANK_MODEL_ID=<your_rerank_model_id>`
+- Optional: `OPENSEARCH_ML_RERANK_TIMEOUT_MS` (defaults to `RERANK_TIMEOUT_MS`)
+
+Behavior:
+- If `OPENSEARCH_ML_RERANK_MODEL_ID` is set, Memora prefers ML Commons for rerank scores
+- Otherwise, if `RERANK_ENDPOINT` is set, Memora calls that HTTP service
+- If neither is configured or a call fails, Memora falls back to a lightweight local reranker
+
+Example:
+```bash
+export MEMORA_RERANK_ENABLED=true
+export OPENSEARCH_ML_RERANK_MODEL_ID=abc123            # your ML Commons reranker model id
+export OPENSEARCH_ML_RERANK_TIMEOUT_MS=1500             # optional, overrides timeout for OS-ML rerank
+# Optional HTTP fallback (used if OPENSEARCH_ML_RERANK_MODEL_ID is not set)
+# export RERANK_ENDPOINT=http://localhost:8081/rerank
+```
+
+Notes:
+- This is separate from “Embeddings via OpenSearch ML Pipelines.” Embedding pipelines generate vectors on write/search. Cross-encoder rerank runs at response-time to rescore shortlists.
+- You can also configure an OpenSearch search pipeline with a `rerank` response processor if you prefer server-side orchestration (see examples in this README).
+
 ## Minimal API
 
 See docs/agent-integration.md for the full agent-facing MCP tool catalog and recommended flows.

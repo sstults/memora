@@ -289,7 +289,10 @@ async function ensureModelRegisteredDeployedFromEnv(client: Client): Promise<str
     );
   }
 
-  writeCachedModelId(modelId);
+  const useCache = (process.env.MEMORA_OS_ENABLE_MODEL_ID_CACHE || "false").toLowerCase() === "true";
+  if (useCache) {
+    writeCachedModelId(modelId);
+  }
   return modelId;
 }
 
@@ -325,7 +328,8 @@ export async function ensurePipelineAndAttachmentFromEnv(): Promise<void> {
   const semanticIndex = process.env.MEMORA_SEMANTIC_INDEX || "mem-semantic";
 
   // Resolve model id: prefer explicit OPENSEARCH_ML_MODEL_ID; fallback to dev-only auto-register if enabled
-  let modelId = process.env.OPENSEARCH_ML_MODEL_ID || readCachedModelId();
+  const useCache = (process.env.MEMORA_OS_ENABLE_MODEL_ID_CACHE || "false").toLowerCase() === "true";
+  let modelId = process.env.OPENSEARCH_ML_MODEL_ID || (useCache ? readCachedModelId() : undefined);
   if (!modelId) {
     modelId = await ensureModelRegisteredDeployedFromEnv(client);
   }
@@ -394,4 +398,69 @@ export async function ensureSearchPipelineFromEnv(): Promise<void> {
   if (attachDefault) {
     await attachDefaultSearchPipelineToIndex({ index: semanticIndex, pipeline: name, client });
   }
+}
+
+/**
+ * Predict cross-encoder rerank scores using OpenSearch ML Commons model.
+ * Accepts a query string and an array of candidate texts, returns a score per text.
+ * Attempts to normalize across common ML Commons response shapes.
+ */
+export async function predictRerankScores(params: {
+  modelId: string;
+  query: string;
+  texts: string[];
+  timeoutMs?: number;
+  client?: Client;
+}): Promise<number[]> {
+  const {
+    modelId,
+    query,
+    texts,
+    timeoutMs = Number(process.env.MEMORA_OS_CLIENT_TIMEOUT_MS ?? process.env.MEMORA_OS_REQUEST_TIMEOUT_MS ?? 10000),
+    client = getClient()
+  } = params;
+
+  const resp = await withRetries(() =>
+    (client as any).transport.request({
+      method: "POST",
+      path: `/_plugins/_ml/models/${encodeURIComponent(modelId)}/_predict`,
+      body: {
+        // Common pattern for cross-encoder rerank input
+        parameters: { task_type: "RERANKING" },
+        input: { query, texts }
+      },
+      ...(timeoutMs ? { requestTimeout: timeoutMs } : {})
+    })
+  );
+
+  const body: any = (resp as any)?.body ?? resp;
+
+  // Direct scores array
+  if (Array.isArray(body?.scores)) return body.scores as number[];
+
+  // ML Commons inference_results shape
+  const fromInferenceResults =
+    body?.inference_results?.[0]?.response?.scores ||
+    body?.inference_results?.[0]?.output?.scores ||
+    body?.output?.scores ||
+    undefined;
+
+  if (Array.isArray(fromInferenceResults)) return fromInferenceResults as number[];
+
+  // Fallback: locate the first array of numbers in the response
+  const nums = deepFindFirstNumberArray(body);
+  if (Array.isArray(nums)) return nums as number[];
+
+  throw new Error("Unexpected ML predict response shape for rerank; no scores found");
+}
+
+function deepFindFirstNumberArray(obj: any): number[] | undefined {
+  if (!obj || typeof obj !== "object") return undefined;
+  if (Array.isArray(obj) && obj.every((x) => typeof x === "number")) return obj as number[];
+  for (const k of Object.keys(obj)) {
+    const v = (obj as any)[k];
+    const found = deepFindFirstNumberArray(v);
+    if (found) return found;
+  }
+  return undefined;
 }

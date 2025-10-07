@@ -7,7 +7,8 @@ import {
   ensurePipelineAndAttachmentFromEnv,
   ensureSearchPipeline,
   attachDefaultSearchPipelineToIndex,
-  ensureSearchPipelineFromEnv
+  ensureSearchPipelineFromEnv,
+  predictRerankScores
 } from "../../../src/services/os-ml";
 
 describe("os-ml helpers", () => {
@@ -238,5 +239,80 @@ describe("os-ml helpers", () => {
     expect(warnSpy).toHaveBeenCalledTimes(1);
     const msg = (warnSpy.mock.calls[0]?.[0] || "").toString();
     expect(msg).toMatch(/MEMORA_OS_SEARCH_PIPELINE_BODY_JSON is not set/i);
+  });
+});
+
+describe("predictRerankScores", () => {
+  it("returns scores from direct body.scores", async () => {
+    const calls: any[] = [];
+    const fakeClient: any = {
+      transport: {
+        request: vi.fn(async (args: any) => {
+          calls.push(args);
+          return { body: { scores: [0.9, 0.1, 0.5] } };
+        })
+      }
+    };
+
+    const scores = await predictRerankScores({
+      modelId: "model-rerank",
+      query: "q",
+      texts: ["a", "b", "c"],
+      timeoutMs: 2000,
+      client: fakeClient
+    });
+
+    expect(fakeClient.transport.request).toHaveBeenCalledTimes(1);
+    expect(calls[0].method).toBe("POST");
+    expect(calls[0].path).toMatch(/_plugins\/_ml\/models\/model-rerank\/_predict/);
+    expect(scores).toEqual([0.9, 0.1, 0.5]);
+  });
+
+  it("parses scores from inference_results nested response", async () => {
+    const fakeClient: any = {
+      transport: {
+        request: vi.fn(async () => {
+          return {
+            body: {
+              inference_results: [
+                { response: { scores: [0.2, 0.8] } }
+              ]
+            }
+          };
+        })
+      }
+    };
+
+    const scores = await predictRerankScores({
+      modelId: "m",
+      query: "q",
+      texts: ["t1", "t2"],
+      client: fakeClient
+    });
+
+    expect(scores).toEqual([0.2, 0.8]);
+  });
+
+  it("falls back to first numeric array in arbitrary shape", async () => {
+    const fakeClient: any = {
+      transport: {
+        request: vi.fn(async () => {
+          return {
+            body: {
+              foo: { bar: { baz: [0.3, 0.7, 0.1] } }
+            }
+          };
+        })
+      }
+    };
+
+    const scores = await predictRerankScores({
+      modelId: "m",
+      query: "q",
+      texts: ["t1", "t2", "t3"],
+      client: fakeClient
+    });
+
+    expect(scores).toEqual([0.3, 0.7, 0.1]);
   });
 });

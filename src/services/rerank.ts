@@ -18,6 +18,7 @@
 
 import { Hit as FusedHit } from "../domain/fusion.js";
 import { debug } from "./log.js";
+import { predictRerankScores } from "./os-ml.js";
 
 export interface RerankOptions {
   maxCandidates?: number;  // default 64
@@ -29,6 +30,8 @@ const ENDPOINT = process.env.RERANK_ENDPOINT;
 const API_KEY = process.env.RERANK_API_KEY || "";
 const TIMEOUT_MS = numFromEnv("RERANK_TIMEOUT_MS", 1500);
 const MAX_RETRIES = numFromEnv("RERANK_MAX_RETRIES", 2);
+const OS_RERANK_MODEL_ID = process.env.OPENSEARCH_ML_RERANK_MODEL_ID;
+const OS_RERANK_TIMEOUT_MS = numFromEnv("OPENSEARCH_ML_RERANK_TIMEOUT_MS", TIMEOUT_MS);
 const log = debug("memora:rerank");
 
 export async function crossRerank(
@@ -42,6 +45,34 @@ export async function crossRerank(
 
   const started = Date.now();
   log("begin", { hits: hits.length, candidates: candidates.length, maxC, budgetMs: opts.budgetMs ?? TIMEOUT_MS, endpoint: Boolean(ENDPOINT) });
+
+  // OpenSearch ML cross-encoder rerank if configured
+  if (OS_RERANK_MODEL_ID) {
+    try {
+      const r0 = Date.now();
+      const scores = await predictRerankScores({
+        modelId: OS_RERANK_MODEL_ID,
+        query,
+        texts: candidates.map(c => c.text || ""),
+        timeoutMs: Math.max(250, Math.min(OS_RERANK_TIMEOUT_MS, opts.budgetMs ?? OS_RERANK_TIMEOUT_MS))
+      });
+
+      const reweighted = candidates.map((c, i) => ({
+        ...c,
+        score: isFiniteNumber(scores[i]) ? scores[i] : c.score
+      }));
+      log("osml.ok", { tookMs: Date.now() - r0, candidates: candidates.length });
+
+      const fusedIds = new Set(reweighted.map(r => r.id));
+      const tail = hits.filter(h => !fusedIds.has(h.id));
+      reweighted.sort((a, b) => b.score - a.score);
+      log("osml.end", { totalMs: Date.now() - started, out: reweighted.length });
+      return [...reweighted, ...tail];
+    } catch (err) {
+      log("osml.error", { message: (err as Error).message });
+      console.warn(`[rerank] OpenSearch ML rerank failed: ${(err as Error).message}. Falling back.`);
+    }
+  }
 
   // Remote rerank if configured
   if (ENDPOINT) {
