@@ -20,12 +20,18 @@ describe("rerank service", () => {
     // Keep tests deterministic
     process.env.RERANK_TIMEOUT_MS = "1500";
     process.env.RERANK_MAX_RETRIES = "0";
+    // Enable reranker by default for tests; individual tests may override
+    process.env.MEMORA_RERANK_ENABLED = "true";
+    // Ensure OS-ML rerank path is disabled by default unless explicitly enabled in a test
+    delete process.env.OPENSEARCH_ML_RERANK_MODEL_ID;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     delete process.env.RERANK_ENDPOINT;
     delete process.env.RERANK_API_KEY;
+    delete process.env.MEMORA_RERANK_ENABLED;
+    delete process.env.OPENSEARCH_ML_RERANK_MODEL_ID;
   });
 
   it("local fallback reranks by lexical overlap when no endpoint configured", async () => {
@@ -107,5 +113,45 @@ describe("rerank service", () => {
     const out = await crossRerank("beta query", hits as any, { maxCandidates: 2, budgetMs: 500 });
     // Should still return same set and place x1 first due to lexical overlap with "beta"
     expect(out.map(h => h.id)).toEqual(["x1", "x2"]);
+  });
+
+  it("is a no-op when MEMORA_RERANK_ENABLED=false", async () => {
+    process.env.MEMORA_RERANK_ENABLED = "false";
+    vi.resetModules();
+    const { crossRerank } = await importRerank();
+
+    const hits: FusedHit[] = [
+      { id: "a", text: "one", score: 0.0, source: "semantic" },
+      { id: "b", text: "two", score: 0.0, source: "semantic" }
+    ];
+
+    const out = await crossRerank("query", hits as any, { maxCandidates: 2, budgetMs: 500 });
+    expect(out.map(h => h.id)).toEqual(["a", "b"]);
+  });
+
+  it("clamps maxCandidates to 128 for remote rerank", async () => {
+    process.env.RERANK_ENDPOINT = "http://localhost:8081/rerank";
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ scores: Array(128).fill(0).map((_, i) => 128 - i) })
+    });
+    (globalThis as any).fetch = fetchMock;
+
+    vi.resetModules();
+    const { crossRerank } = await importRerank();
+
+    const hits: FusedHit[] = Array.from({ length: 140 }, (_, i) => ({
+      id: `h${i + 1}`,
+      text: `t${i + 1}`,
+      score: 0.0,
+      source: "semantic"
+    }));
+
+    await crossRerank("q", hits as any, { maxCandidates: 999, budgetMs: 800 });
+
+    // Expect fetch called once with 128 candidates
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const bodySent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(bodySent.candidates).toHaveLength(128);
   });
 });

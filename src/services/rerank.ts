@@ -33,15 +33,20 @@ const MAX_RETRIES = numFromEnv("RERANK_MAX_RETRIES", 2);
 const OS_RERANK_MODEL_ID = process.env.OPENSEARCH_ML_RERANK_MODEL_ID;
 const OS_RERANK_TIMEOUT_MS = numFromEnv("OPENSEARCH_ML_RERANK_TIMEOUT_MS", TIMEOUT_MS);
 const log = debug("memora:rerank");
+const ENABLED = (process.env.MEMORA_RERANK_ENABLED || "false").toLowerCase() === "true";
 
 export async function crossRerank(
   query: string,
   hits: FusedHit[],
   opts: RerankOptions = {}
 ): Promise<FusedHit[]> {
-  const maxC = opts.maxCandidates ?? 64;
+  const maxC = Math.min(opts.maxCandidates ?? 64, 128);
   const candidates = hits.slice(0, maxC);
   if (candidates.length <= 1) return hits;
+  if (!ENABLED) {
+    log("disabled", { reason: "MEMORA_RERANK_ENABLED=false" });
+    return hits;
+  }
 
   const started = Date.now();
   log("begin", { hits: hits.length, candidates: candidates.length, maxC, budgetMs: opts.budgetMs ?? TIMEOUT_MS, endpoint: Boolean(ENDPOINT) });
