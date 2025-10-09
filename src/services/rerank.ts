@@ -19,6 +19,7 @@
 import { Hit as FusedHit } from "../domain/fusion.js";
 import { debug } from "./log.js";
 import { predictRerankScores } from "./os-ml.js";
+import { retrievalBoolean } from "./config.js";
 
 export interface RerankOptions {
   maxCandidates?: number;  // default 64
@@ -33,7 +34,9 @@ const MAX_RETRIES = numFromEnv("RERANK_MAX_RETRIES", 2);
 const OS_RERANK_MODEL_ID = process.env.OPENSEARCH_ML_RERANK_MODEL_ID;
 const OS_RERANK_TIMEOUT_MS = numFromEnv("OPENSEARCH_ML_RERANK_TIMEOUT_MS", TIMEOUT_MS);
 const log = debug("memora:rerank");
-const ENABLED = (process.env.MEMORA_RERANK_ENABLED || "false").toLowerCase() === "true";
+// Rerank gating: env override if set, else fall back to retrieval.yaml (rerank.enabled)
+const ENV_RERANK = process.env.MEMORA_RERANK_ENABLED;
+const ENABLED = ENV_RERANK ? ENV_RERANK.toLowerCase() === "true" : retrievalBoolean("rerank.enabled", false);
 
 export async function crossRerank(
   query: string,

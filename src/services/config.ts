@@ -99,6 +99,11 @@ export function retrievalArray(path: string, dflt: string[]): string[] {
   return coerceStringArray(v, dflt);
 }
 
+export function retrievalString(path: string, dflt: string): string {
+  const v = getIn(getRetrievalConfig(), path);
+  return typeof v === "string" ? v : dflt;
+}
+
 // Typed getters: Policies (config/memory_policies.yaml)
 
 export function policyNumber(path: string, dflt: number): number {

@@ -1,9 +1,25 @@
 {
   "settings": {
     "index.knn": true,
-    "knn.algo_param.ef_search": 128,
+    "knn.algo_param.ef_search": 200,
     "index.number_of_shards": 3,
-    "index.number_of_replicas": 1
+    "index.number_of_replicas": 1,
+    "analysis": {
+      "analyzer": {
+        "english_shingle": {
+          "type": "custom",
+          "tokenizer": "standard",
+          "filter": ["lowercase", "english_stop", "porter_stem", "my_shingle"]
+        }
+      },
+      "filter": {
+        "english_stop": { "type": "stop", "stopwords": "_english_" },
+        "my_shingle": { "type": "shingle", "min_shingle_size": 2, "max_shingle_size": 2, "output_unigrams": true }
+      }
+    },
+    "similarity": {
+      "bm25_sem": { "type": "BM25", "k1": 1.2, "b": 0.6 }
+    }
   },
   "mappings": {
     "properties": {
@@ -12,8 +28,22 @@
       "context_id":{"type":"keyword"},
       "task_scope":{"type":"keyword"},
       "mem_id":{"type":"keyword"},
-      "title":{"type":"text"},
-      "text":{"type":"text"},
+      "title":{
+        "type":"text",
+        "similarity":"bm25_sem",
+        "fields":{
+          "shingles":{"type":"text","analyzer":"english_shingle"},
+          "raw":{"type":"keyword","ignore_above":256}
+        }
+      },
+      "text":{
+        "type":"text",
+        "similarity":"bm25_sem",
+        "fields":{
+          "shingles":{"type":"text","analyzer":"english_shingle"},
+          "raw":{"type":"keyword","ignore_above":256}
+        }
+      },
       "tags":{"type":"keyword"},
       "salience":{"type":"float"},
       "novelty":{"type":"float"},

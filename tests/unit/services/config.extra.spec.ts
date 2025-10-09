@@ -41,7 +41,7 @@ describe("config readers - booleans, defaults, and cache reset", () => {
     } = mod as any;
 
     // Prime caches with real file values
-    expect(retrievalNumber("stages.semantic.top_k", 0)).toBe(50);
+    expect(retrievalNumber("stages.semantic.top_k", 0)).toBe(150);
 
     // Mock a different YAML payload for subsequent reads
     const mockedYaml = `

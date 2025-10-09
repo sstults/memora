@@ -8,7 +8,7 @@ import { getClient, bulkSafe, indexWithRetries, searchWithRetries, withRetries }
 import { embed } from "../services/embedder.js";
 import { scoreSalience, atomicSplit, summarizeIfLong, redact } from "../services/salience.js";
 import { crossRerank } from "../services/rerank.js";
-import { policyNumber, policyArray, retrievalNumber, retrievalArray } from "../services/config.js";
+import { policyNumber, policyArray, retrievalNumber, retrievalArray, retrievalBoolean, retrievalString } from "../services/config.js";
 import { packPrompt } from "../services/packer.js";
 
 import { requireContext } from "./context.js";
@@ -30,7 +30,9 @@ const FACTS_INDEX = process.env.MEMORA_FACTS_INDEX || "mem-facts";
 const EPISODIC_PREFIX = process.env.MEMORA_EPI_PREFIX || "mem-episodic-";
 
 const DEFAULT_BUDGET = Number(process.env.MEMORA_DEFAULT_BUDGET || 12);
-const RERANK_ENABLED = process.env.MEMORA_RERANK_ENABLED === "true";
+// Rerank gating: env override if set, else fall back to retrieval.yaml (rerank.enabled)
+const ENV_RERANK = process.env.MEMORA_RERANK_ENABLED;
+const RERANK_ENABLED = ENV_RERANK ? ENV_RERANK.toLowerCase() === "true" : retrievalBoolean("rerank.enabled", false);
 const USE_OS_PIPELINE = (process.env.MEMORA_EMBED_PROVIDER || "").toLowerCase() === "opensearch_pipeline";
 const log = debug("memora:memory");
 
@@ -381,12 +383,29 @@ function flattenFactForIndex(f: Fact) {
 
 // ---- Episodic BM25
 async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<FusedHit[]> {
-  const must = [{
-    simple_query_string: {
+  // Build lexical multi_match with optional shingles/keyword subfields and guardrails
+  const useShingles = retrievalBoolean("lexical.use_shingles", true);
+  const fields = [
+    "content^3",
+    ...(useShingles ? ["content.shingles^1.2"] : []),
+    "tags^2",
+    "artifacts^1",
+    "content.raw^0.5"
+  ];
+  const mmType = retrievalString("lexical.multi_match_type", "best_fields");
+  const tieBreaker = retrievalNumber("lexical.tie_breaker", 0.3);
+  const msmPct = retrievalNumber("lexical.min_should_match_pct", 60);
+  const msm = computedMinShouldMatch(String(q.objective ?? ""), msmPct);
+
+  const mmClause: any = {
+    multi_match: {
       query: q.objective,
-      fields: ["content^3", "tags", "artifacts"]
+      type: mmType,
+      fields,
+      tie_breaker: tieBreaker,
+      ...(msm ? { minimum_should_match: msm } : {})
     }
-  }];
+  };
 
   // Episodic docs do not include env/api_version or scope; tailor filters accordingly
   const eopts: FilterOptions = {
@@ -399,15 +418,38 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
     recent_days: fopts.recent_days
   };
   const filter = buildBoolFilter(eopts);
-  const body = {
+
+  // Optional time decay on ts
+  const tdEnabled = retrievalBoolean("time_decay.enabled", false);
+  const tdHalfLife = retrievalNumber("time_decay.episodic.half_life_days", 45);
+  const tdWeight = retrievalNumber("time_decay.episodic.weight", 0.25);
+
+  const boolQuery: any = {
+    bool: {
+      must: [mmClause],
+      filter: filter.bool.filter,
+      must_not: filter.bool.must_not
+    }
+  };
+
+  const body = tdEnabled ? {
     size: getPolicy("stages.episodic.top_k", 25),
     query: {
-      bool: {
-        must,
-        filter: filter.bool.filter,
-        must_not: filter.bool.must_not
+      function_score: {
+        query: boolQuery,
+        score_mode: "multiply",
+        boost_mode: "multiply",
+        functions: [{
+          gauss: {
+            ts: { origin: "now", scale: `${Math.max(1, tdHalfLife)}d`, decay: 0.5 }
+          },
+          weight: tdWeight
+        }]
       }
     }
+  } : {
+    size: getPolicy("stages.episodic.top_k", 25),
+    query: boolQuery
   };
 
   const resp = await searchWithRetries({ index: `${EPISODIC_PREFIX}*`, body });
@@ -495,16 +537,26 @@ async function semanticSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
     hits = (resp2.body.hits?.hits || []);
   }
 
-  return hits.map((hit: any, i: number) => ({
-    id: `mem:${hit._id}`,
-    text: hit._source?.text || "",
-    score: hit._score ?? 0,
-    rank: i + 1,
-    source: "semantic" as const,
-    tags: hit._source?.tags || [],
-    why: "semantic: vector similarity",
-    meta: { embedding: hit._source?.embedding }
-  }));
+  const tdEnabled = retrievalBoolean("time_decay.enabled", false);
+  const halfLife = retrievalNumber("time_decay.semantic.half_life_days", 45);
+  const weight = retrievalNumber("time_decay.semantic.weight", 0.15);
+
+  return hits.map((hit: any, i: number) => {
+    const baseScore = hit._score ?? 0;
+    const lu: string | undefined = hit._source?.last_used;
+    const decay = tdEnabled ? recencyFactor(lu, halfLife) : 0;
+    const adj = baseScore * (1 + weight * decay);
+    return {
+      id: `mem:${hit._id}`,
+      text: hit._source?.text || "",
+      score: tdEnabled ? adj : baseScore,
+      rank: i + 1,
+      source: "semantic" as const,
+      tags: hit._source?.tags || [],
+      why: "semantic: vector similarity",
+      meta: { embedding: hit._source?.embedding, last_used: lu }
+    };
+  });
 }
 
 // ---- Facts (1–2 hop expansion; here we just keyword-match s/p/o)
@@ -570,6 +622,42 @@ async function touchLastUsed(memIds: string[]) {
 function deriveTitle(text: string): string {
   const first = text.split("\n")[0].trim();
   return first.length > 80 ? first.slice(0, 77) + "…" : first;
+}
+
+/**
+ * Compute minimum_should_match guardrail string like "60%" for queries with 4+ terms.
+ * Returns null when not applied.
+ */
+function computedMinShouldMatch(q: string, pct: number): string | null {
+  const terms = q
+    .toLowerCase()
+    .replace(/[^a-z0-9_./:-]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (terms.length >= 4) {
+    const p = Math.max(1, Math.min(100, Math.floor(pct)));
+    return `${p}%`;
+  }
+  return null;
+}
+
+/**
+ * Recency factor in [0,1], where 1 means "now", 0.5 at half-life in days.
+ * Missing/invalid timestamps return 0 (no boost).
+ */
+function recencyFactor(isoTs: string | null | undefined, halfLifeDays: number): number {
+  if (!isoTs) return 0;
+  const t = new Date(isoTs).getTime();
+  if (!Number.isFinite(t)) return 0;
+  const now = Date.now();
+  const ageMs = Math.max(0, now - t);
+  const ageDays = ageMs / (1000 * 60 * 60 * 24);
+  const hl = Math.max(1e-6, halfLifeDays);
+  // Exponential decay with half-life
+  const factor = Math.pow(0.5, ageDays / hl);
+  // Bound to [0,1]
+  return Math.max(0, Math.min(1, factor));
 }
 
 /**

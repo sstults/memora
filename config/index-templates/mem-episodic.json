@@ -1,7 +1,26 @@
 {
   "index_patterns": ["mem-episodic-*"],
   "template": {
-    "settings": {"index.number_of_shards": 3, "index.number_of_replicas": 1},
+    "settings": {
+      "index.number_of_shards": 3,
+      "index.number_of_replicas": 1,
+      "analysis": {
+        "analyzer": {
+          "english_shingle": {
+            "type": "custom",
+            "tokenizer": "standard",
+            "filter": ["lowercase", "english_stop", "porter_stem", "my_shingle"]
+          }
+        },
+        "filter": {
+          "english_stop": { "type": "stop", "stopwords": "_english_" },
+          "my_shingle": { "type": "shingle", "min_shingle_size": 2, "max_shingle_size": 2, "output_unigrams": true }
+        }
+      },
+      "similarity": {
+        "bm25_episodic": { "type": "BM25", "k1": 1.2, "b": 0.4 }
+      }
+    },
     "mappings": {
       "properties": {
         "tenant_id":{"type":"keyword"},
@@ -11,7 +30,14 @@
         "event_id":{"type":"keyword"},
         "ts":{"type":"date"},
         "role":{"type":"keyword"},
-        "content":{"type":"text"},
+        "content":{
+          "type":"text",
+          "similarity":"bm25_episodic",
+          "fields":{
+            "shingles":{"type":"text","analyzer":"english_shingle"},
+            "raw":{"type":"keyword","ignore_above":256}
+          }
+        },
         "tags":{"type":"keyword"},
         "artifacts":{"type":"keyword"},
         "hash":{"type":"keyword"}

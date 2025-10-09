@@ -1,0 +1,22 @@
+{
+  "description": "Memora hybrid search fusion using Reciprocal Rank Fusion (RRF)",
+  "request_processors": [
+    {
+      "ranking_feature_query_extraction": {
+        "knn_to_query": true
+      }
+    }
+  ],
+  "response_processors": [
+    {
+      "score_rerank": {
+        "rank_window_size": 200,
+        "ranker": {
+          "rrf": {
+            "rank_constant": 60
+          }
+        }
+      }
+    }
+  ]
+}

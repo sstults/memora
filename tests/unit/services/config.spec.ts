@@ -9,7 +9,7 @@ async function importFresh() {
 describe("config readers - real YAML", () => {
   it("reads retrieval numbers from config/retrieval.yaml", async () => {
     const { retrievalNumber } = await importFresh();
-    expect(retrievalNumber("stages.episodic.top_k", 0)).toBe(25);
+    expect(retrievalNumber("stages.episodic.top_k", 0)).toBe(100);
     expect(retrievalNumber("stages.semantic.ann_candidates", 0)).toBe(200);
     expect(retrievalNumber("fusion.rrf_k", 0)).toBe(60);
   });

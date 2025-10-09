@@ -4,14 +4,14 @@
 stages:
   episodic:
     enabled: true
-    top_k: 25
+    top_k: 100
     query_type: bm25         # BM25 or match
     filters:
       default_scope: ["this_task", "project"]
       recent_days: 30        # limit episodic recall to recent N days
   semantic:
     enabled: true
-    top_k: 50
+    top_k: 150
     ann_candidates: 200
     metric: cosine
     filters:
@@ -37,9 +37,27 @@ rerank:
 diversity:
   enabled: true
   method: mmr
-  lambda: 0.85               # tradeoff relevance vs. diversity
+  lambda: 0.8                # tradeoff relevance vs. diversity
   min_distance: 0.2          # threshold for considering items duplicates
   max_per_tag: 5             # prevent one tag (e.g., "error") from dominating
+
+lexical:
+  # Lexical/BM25 query tuning
+  multi_match_type: best_fields
+  tie_breaker: 0.3
+  min_should_match_pct: 60   # apply when query has 4+ terms
+  use_shingles: true         # use *.shingles fields when available
+
+time_decay:
+  enabled: true
+  episodic:
+    field: ts
+    half_life_days: 45
+    weight: 0.25
+  semantic:
+    field: last_used
+    half_life_days: 45
+    weight: 0.15
 
 filters:
   # Global filters applied to every retrieval
