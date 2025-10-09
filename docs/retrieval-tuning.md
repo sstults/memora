@@ -64,6 +64,30 @@ Migration and rollout
    - Use this pipeline by issuing OpenSearch searches with ?search_pipeline=memora_rrf or attaching index.search.default_pipeline, OR set MEMORA_OS_SEARCH_PIPELINE_BODY_JSON and let src/services/os-ml.ts create/attach a pipeline (requires pipeline body provided via env). The current Memora default continues to rely on in-process RRF/MMR.
 
 A/B and validation checklist
+
+OS-ML rerank smoke (dev)
+- Purpose: sanity-check an ML Commons cross-encoder reranker model_id for latency and stability before enabling in-service rerank.
+- Prereqs:
+  - OpenSearch running with ML Commons and your reranker deployed
+  - Export OPENSEARCH_ML_RERANK_MODEL_ID
+- Run:
+  - npm run dev:rerank:smoke -- --iters 30 --k 64 --timeout 1500
+  - Optional flags:
+    - --iters N          number of requests (default 30)
+    - --k K              candidates per request, capped at 128 (default 64)
+    - --timeout MS       per-request timeoutMs (default OPENSEARCH_ML_RERANK_TIMEOUT_MS or 1500)
+    - --query "text"     query string (default: find relevant project notes about opensearch ml reranking)
+- Output:
+  - Prints JSON summary to stdout with iters/ok/fail and latency stats (min/mean/p50/p95/max)
+  - Logs each iteration to stderr with tookMs; non-zero exit if any failures
+- Acceptance (from ActiveContext):
+  - p95 ≤ 1200 ms
+  - 0 failures
+- Notes:
+  - In-service rerank stage now logs timing and rank deltas when DEBUG includes memora:rerank. Look for:
+    - osml.ok, osml.delta, osml.end (OpenSearch ML path)
+    - remote.ok, remote.delta, remote.end (HTTP path)
+    - local and local.delta (local fallback)
 - Pre/post benchmark runs (with fixed seeds)
   - LongMemEval:
     - ./benchmarks/runners/run_longmemeval.sh

@@ -22,6 +22,7 @@
     "dev:embedder": "node --import ./scripts/register-ts-node.mjs scripts/dev/embedder_server.ts",
     "dev:reranker": "node --import ./scripts/register-ts-node.mjs scripts/dev/reranker_server.ts",
     "dev:reranker:cohere": "node --import ./scripts/register-ts-node.mjs scripts/dev/reranker_cohere_server.ts",
+    "dev:rerank:smoke": "node --import ./scripts/register-ts-node.mjs scripts/dev/rerank_smoke.ts",
     "prepare": "husky",
     "bench:longmem": "bash benchmarks/runners/run_longmemeval.sh --variant C --seed 42 --out benchmarks/reports/longmemeval.C.42.jsonl",
     "bench:longmem:A": "bash benchmarks/runners/run_longmemeval.sh --variant A --seed 42 --out benchmarks/reports/longmemeval.A.42.jsonl",

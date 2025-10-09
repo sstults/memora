@@ -74,6 +74,8 @@ export async function crossRerank(
       const fusedIds = new Set(reweighted.map(r => r.id));
       const tail = hits.filter(h => !fusedIds.has(h.id));
       reweighted.sort((a, b) => b.score - a.score);
+      const delta = rankDeltaStats(candidates, reweighted);
+      log("osml.delta", delta);
       log("osml.end", { totalMs: Date.now() - started, out: reweighted.length });
       return [...reweighted, ...tail];
     } catch (err) {
@@ -106,6 +108,8 @@ export async function crossRerank(
       const fusedIds = new Set(reweighted.map(r => r.id));
       const tail = hits.filter(h => !fusedIds.has(h.id));
       reweighted.sort((a, b) => b.score - a.score);
+      const delta = rankDeltaStats(candidates, reweighted);
+      log("remote.delta", delta);
       log("remote.end", { totalMs: Date.now() - started, out: reweighted.length });
       return [...reweighted, ...tail];
     } catch (err) {
@@ -122,6 +126,8 @@ export async function crossRerank(
   const tail = hits.filter(h => !localIds.has(h.id));
   const budgetLeft = (opts.budgetMs ?? TIMEOUT_MS) - (Date.now() - started);
   log("local", { tookMs: Date.now() - l0, candidates: candidates.length, budgetLeft });
+  const delta = rankDeltaStats(candidates, local);
+  log("local.delta", delta);
   // If we already blew the budget, just return; otherwise concatenate.
   return budgetLeft <= 0 ? hits : [...local, ...tail];
 }
@@ -243,6 +249,39 @@ function averageEmbeddingFromHits(hits: FusedHit[]): number[] | undefined {
   if (!sum || count === 0) return undefined;
   for (let i = 0; i < sum.length; i++) sum[i] /= count;
   return sum;
+}
+
+/**
+ * Compute simple rank delta diagnostics comparing original candidate order vs new order.
+ * Reports topBefore/After, movedUp/Down/Unchanged counts, avg/max absolute position delta.
+ */
+function rankDeltaStats(original: FusedHit[], reranked: FusedHit[]) {
+  const oldPos = new Map<string, number>();
+  original.forEach((h, i) => oldPos.set(h.id, i));
+  let movedUp = 0, movedDown = 0, unchanged = 0;
+  let sumAbs = 0, maxAbs = 0;
+  for (let i = 0; i < reranked.length; i++) {
+    const id = reranked[i].id;
+    const was = oldPos.get(id);
+    if (was == null) continue;
+    const delta = was - i;
+    if (delta > 0) movedUp++;
+    else if (delta < 0) movedDown++;
+    else unchanged++;
+    const abs = Math.abs(delta);
+    sumAbs += abs;
+    if (abs > maxAbs) maxAbs = abs;
+  }
+  const avgAbs = reranked.length ? +(sumAbs / reranked.length).toFixed(3) : 0;
+  return {
+    topBefore: original[0]?.id,
+    topAfter: reranked[0]?.id,
+    movedUp,
+    movedDown,
+    unchanged,
+    avgAbsDelta: avgAbs,
+    maxAbsDelta: maxAbs
+  };
 }
 
 // ----------------------------
