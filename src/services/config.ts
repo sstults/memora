@@ -23,7 +23,30 @@ function safeLoadYaml(path: string): AnyObject {
 
 export function getRetrievalConfig(): AnyObject {
   if (!retrievalCache) {
-    retrievalCache = safeLoadYaml("config/retrieval.yaml");
+    const basePath = process.env.MEMORA_RETRIEVAL_CONFIG_PATH || "config/retrieval.yaml";
+    const base = safeLoadYaml(basePath);
+
+    // Apply optional overrides in order: file then JSON string (JSON takes precedence)
+    let merged = base;
+
+    const overridesFile = process.env.MEMORA_RETRIEVAL_OVERRIDES_FILE;
+    if (overridesFile && overridesFile.trim().length > 0) {
+      merged = deepMerge(merged, safeLoadJsonFile(overridesFile));
+    }
+
+    const overridesJson = process.env.MEMORA_RETRIEVAL_OVERRIDES_JSON;
+    if (overridesJson && overridesJson.trim().length > 0) {
+      try {
+        const obj = JSON.parse(overridesJson);
+        if (obj && typeof obj === "object") {
+          merged = deepMerge(merged, obj as AnyObject);
+        }
+      } catch {
+        // ignore malformed JSON
+      }
+    }
+
+    retrievalCache = merged;
   }
   return retrievalCache!;
 }
@@ -80,6 +103,35 @@ function coerceBoolean(v: any, dflt: boolean): boolean {
 function coerceStringArray(v: any, dflt: string[]): string[] {
   if (Array.isArray(v)) return v.filter((x) => typeof x === "string");
   return dflt;
+}
+
+// Deep merge utility for override application (arrays and scalars are replaced)
+function isPlainObject(v: any): v is AnyObject {
+  return v && typeof v === "object" && !Array.isArray(v);
+}
+
+function deepMerge(a: AnyObject, b: AnyObject): AnyObject {
+  const out: AnyObject = { ...a };
+  for (const k of Object.keys(b)) {
+    const bv = b[k];
+    const av = out[k];
+    if (isPlainObject(av) && isPlainObject(bv)) {
+      out[k] = deepMerge(av, bv);
+    } else {
+      out[k] = bv;
+    }
+  }
+  return out;
+}
+
+function safeLoadJsonFile(path: string): AnyObject {
+  try {
+    const raw = fs.readFileSync(path, "utf8");
+    const obj = JSON.parse(raw);
+    return (obj as AnyObject) || {};
+  } catch {
+    return {};
+  }
 }
 
 // Typed getters: Retrieval (config/retrieval.yaml)

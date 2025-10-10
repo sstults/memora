@@ -39,7 +39,9 @@
     "bench:mab:smoke": "npm run build && npm run bench:mab:driver && npm run bench:mab:score",
     "bench:locomo:driver": "node --import ./scripts/register-ts-node.mjs benchmarks/runners/locomo_driver.ts",
     "bench:locomo:score": "node --import ./scripts/register-ts-node.mjs benchmarks/runners/score_locomo.ts",
-    "bench:locomo:run": "bash benchmarks/runners/run_locomo.sh"
+    "bench:locomo:run": "bash benchmarks/runners/run_locomo.sh",
+    "dev:tune": "node scripts/dev/tune_retrieval.mjs",
+    "dev:tune:small": "node scripts/dev/tune_retrieval.mjs --scenarios scripts/dev/scenarios/retrieval_sweep.small.json --dataset benchmarks/LongMemEval/data/longmemeval_oracle.json --seed 42"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.19.1",

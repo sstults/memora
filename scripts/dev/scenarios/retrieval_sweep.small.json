@@ -1,0 +1,59 @@
+[
+  {
+    "name": "base",
+    "overrides": {},
+    "env": {
+      "MEMORA_RERANK_ENABLED": "false"
+    }
+  },
+  {
+    "name": "sem100",
+    "overrides": {
+      "stages": {
+        "semantic": { "top_k": 100 }
+      }
+    },
+    "env": {
+      "MEMORA_RERANK_ENABLED": "false"
+    }
+  },
+  {
+    "name": "sem150",
+    "overrides": {
+      "stages": {
+        "semantic": { "top_k": 150 }
+      }
+    },
+    "env": {
+      "MEMORA_RERANK_ENABLED": "false"
+    }
+  },
+  {
+    "name": "ef128",
+    "overrides": {},
+    "env": {
+      "MEMORA_RERANK_ENABLED": "false",
+      "KNN_EF_SEARCH": "128"
+    }
+  },
+  {
+    "name": "ef200",
+    "overrides": {},
+    "env": {
+      "MEMORA_RERANK_ENABLED": "false",
+      "KNN_EF_SEARCH": "200"
+    }
+  },
+  {
+    "name": "rerank32",
+    "overrides": {
+      "rerank": {
+        "enabled": true,
+        "max_candidates": 32
+      }
+    },
+    "env": {
+      "MEMORA_RERANK_ENABLED": "true"
+    }
+  }
+]

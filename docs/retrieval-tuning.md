@@ -216,3 +216,29 @@ Backout
 - Rebuild semantic index back to old mapping if necessary (reverse the reindex procedure).
 
 After these tightenings plateau, consider an in-cluster cross-encoder reranker via ML Commons in a search pipeline (top-K ~30–100) as a subsequent step.
+
+Automation — running parameter sweeps
+
+Quick start (small sweep)
+- npm run dev:tune:small
+  - Uses scripts/dev/scenarios/retrieval_sweep.small.json
+  - Writes reports under benchmarks/reports/memora_predictions.<scenario>.jsonl
+  - Scores via benchmarks/runners/score_longmemeval.ts and tags results per scenario
+
+Scenarios format
+- Each scenario supports:
+  - name: label for output tagging
+  - overrides: JSON object merged into retrieval.yaml at runtime (MEMORA_RETRIEVAL_OVERRIDES_JSON)
+  - env: additional environment, e.g.:
+    - MEMORA_RERANK_ENABLED=true|false (takes precedence over retrieval.yaml)
+    - KNN_EF_SEARCH=128|200 (applies ef_search online via scripts/dev/update_semantic_ef_search.sh)
+
+Examples
+- Base (fusion only): {"name":"base","overrides":{},"env":{"MEMORA_RERANK_ENABLED":"false"}}
+- semantic.top_k=150: {"name":"sem150","overrides":{"stages":{"semantic":{"top_k":150}}},"env":{"MEMORA_RERANK_ENABLED":"false"}}
+- ef_search=200 online: {"name":"ef200","overrides":{},"env":{"MEMORA_RERANK_ENABLED":"false","KNN_EF_SEARCH":"200"}}
+- Rerank 32 candidates: {"name":"rerank32","overrides":{"rerank":{"enabled":true,"max_candidates":32}},"env":{"MEMORA_RERANK_ENABLED":"true"}}
+
+Manual single-run (no scenarios)
+- Set overrides without editing YAML:
+  - export MEMORA_RETRIEVAL_OVERRIDES_JSON='{"stages":{"semantic":{"top_k":150}},"fusion":{"rrf
