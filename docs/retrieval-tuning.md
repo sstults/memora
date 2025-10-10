@@ -241,4 +241,11 @@ Examples
 
 Manual single-run (no scenarios)
 - Set overrides without editing YAML:
-  - export MEMORA_RETRIEVAL_OVERRIDES_JSON='{"stages":{"semantic":{"top_k":150}},"fusion":{"rrf
+  - export MEMORA_RETRIEVAL_OVERRIDES_JSON='{"stages":{"semantic":{"top_k":150}},"fusion":{"rrf_k":60},"diversity":{"lambda":0.9}}'
+  - node --import ./scripts/register-ts-node.mjs benchmarks/runners/longmemeval_driver.ts --dataset benchmarks/LongMemEval/data/longmemeval_oracle.json --out benchmarks/reports/memora_predictions.custom.jsonl --variant C --seed 42
+  - node --import ./scripts/register-ts-node.mjs benchmarks/runners/score_longmemeval.ts --hyp benchmarks/reports/memora_predictions.custom.jsonl --dataset benchmarks/LongMemEval/data/longmemeval_oracle.json --tag custom
+- Optional ef_search adjustment prior to run:
+  - bash scripts/dev/update_semantic_ef_search.sh 200
+- Notes:
+  - You can also run: npm run dev:tune:small to execute a predefined scenario sweep.
+  - Restart the service if you changed config/retrieval.yaml (config is cached at runtime).
