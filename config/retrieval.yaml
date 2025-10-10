@@ -29,7 +29,7 @@ fusion:
 
 rerank:
   enabled: true
-  max_candidates: 128        # cap for reranker
+  max_candidates: 32         # cap for reranker (smoke p95 ~801ms at k=32)
   model: cross-encoder-mini  # placeholder; can be ML Commons model id or external service
   budget_ms: 1200            # max latency budget in ms
   budget_usd: 0.01           # optional cost budget per retrieval

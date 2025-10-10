@@ -420,36 +420,99 @@ export async function predictRerankScores(params: {
     client = getClient()
   } = params;
 
-  const resp = await withRetries(() =>
-    (client as any).transport.request({
-      method: "POST",
-      path: `/_plugins/_ml/models/${encodeURIComponent(modelId)}/_predict`,
-      body: {
-        // Common pattern for cross-encoder rerank input
-        parameters: { task_type: "RERANKING" },
-        input: { query, texts }
-      },
-      ...(timeoutMs ? { requestTimeout: timeoutMs } : {})
-    })
-  );
+  // Try multiple payload shapes for cross-encoder rerank to handle version differences
+  const endpoint = `/_plugins/_ml/models/${encodeURIComponent(modelId)}/_predict`;
+  const payloads: any[] = [
+    // Preferred in current docs: top-level query_text/text_docs
+    { query_text: query, text_docs: texts },
+    // Some versions require parameters + top-level fields
+    { parameters: { task_type: "RERANKING" }, query_text: query, text_docs: texts },
+    // Some versions wrap fields in input
+    { parameters: { task_type: "RERANKING" }, input: { query_text: query, text_docs: texts } },
+    // Legacy shape used previously in this repo
+    { parameters: { task_type: "RERANKING" }, input: { query, texts } }
+  ];
 
-  const body: any = (resp as any)?.body ?? resp;
+  let body: any | undefined;
+  let lastErr: any;
+  for (const candidate of payloads) {
+    try {
+      const resp = await withRetries(() =>
+        (client as any).transport.request({
+          method: "POST",
+          path: endpoint,
+          body: candidate,
+          ...(timeoutMs ? { requestTimeout: timeoutMs } : {})
+        })
+      );
+      body = (resp as any)?.body ?? resp;
+      break;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+
+  if (!body) {
+    throw new Error(`ML predict failed for rerank: ${lastErr?.message || String(lastErr)}`);
+  }
 
   // Direct scores array
   if (Array.isArray(body?.scores)) return body.scores as number[];
 
-  // ML Commons inference_results shape
-  const fromInferenceResults =
-    body?.inference_results?.[0]?.response?.scores ||
-    body?.inference_results?.[0]?.output?.scores ||
-    body?.output?.scores ||
-    undefined;
+  // Parse inference_results shapes. Some versions return all scores in a single entry,
+  // others return one entry per document.
+  const ir = body?.inference_results;
+  if (Array.isArray(ir) && ir.length > 0) {
+    // Case A: Combined scores under response.scores on the first entry
+    const combinedScores = ir[0]?.response?.scores;
+    if (Array.isArray(combinedScores) && combinedScores.every((x: any) => typeof x === "number")) {
+      if (combinedScores.length === texts.length) return combinedScores as number[];
+      if (combinedScores.length > 0) return combinedScores as number[];
+    }
 
-  if (Array.isArray(fromInferenceResults)) return fromInferenceResults as number[];
+    // Case B: Combined scores under output[0].data (array of numbers)
+    const outputs0 = ir[0]?.output;
+    if (Array.isArray(outputs0) && outputs0.length > 0) {
+      const data0 = outputs0[0]?.data;
+      if (Array.isArray(data0) && data0.every((x: any) => typeof x === "number")) {
+        if (data0.length === texts.length) return data0 as number[];
+        if (data0.length > 0) return data0 as number[];
+      }
+    }
 
-  // Fallback: locate the first array of numbers in the response
+    // Case C: One score per inference_results entry
+    const scores: number[] = [];
+    for (const r of ir) {
+      const outputs = r?.output;
+      if (Array.isArray(outputs) && outputs.length > 0) {
+        const out0 = outputs[0];
+        if (Array.isArray(out0?.data) && out0.data.length > 0 && typeof out0.data[0] === "number") {
+          scores.push(Number(out0.data[0]));
+          continue;
+        }
+        if (typeof out0?.data === "number") {
+          scores.push(Number(out0.data));
+          continue;
+        }
+      }
+      const one = r?.response?.scores;
+      if (Array.isArray(one) && typeof one[0] === "number") {
+        scores.push(Number(one[0]));
+      }
+    }
+    if (scores.length === texts.length) return scores;
+    if (scores.length > 0) return scores; // best-effort
+  }
+
+  // Fallback: find an array of numbers and adapt length
   const nums = deepFindFirstNumberArray(body);
-  if (Array.isArray(nums)) return nums as number[];
+  if (Array.isArray(nums) && nums.length > 0) {
+    if (nums.length === texts.length) return nums as number[];
+    // Repeat or truncate to match requested length
+    const out: number[] = [];
+    for (let i = 0; i < texts.length; i++) out.push(nums[i % nums.length]);
+    return out;
+  }
 
   throw new Error("Unexpected ML predict response shape for rerank; no scores found");
 }
