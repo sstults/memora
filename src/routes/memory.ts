@@ -10,6 +10,8 @@ import { scoreSalience, atomicSplit, summarizeIfLong, redact } from "../services
 import { crossRerank } from "../services/rerank.js";
 import { policyNumber, policyArray, retrievalNumber, retrievalArray, retrievalBoolean, retrievalString } from "../services/config.js";
 import { packPrompt } from "../services/packer.js";
+import fs from "node:fs";
+import path from "node:path";
 
 import { requireContext } from "./context.js";
 import { buildBoolFilter, FilterOptions } from "../domain/filters.js";
@@ -35,6 +37,36 @@ const ENV_RERANK = process.env.MEMORA_RERANK_ENABLED;
 const RERANK_ENABLED = ENV_RERANK ? ENV_RERANK.toLowerCase() === "true" : retrievalBoolean("rerank.enabled", false);
 const USE_OS_PIPELINE = (process.env.MEMORA_EMBED_PROVIDER || "").toLowerCase() === "opensearch_pipeline";
 const log = debug("memora:memory");
+function currentTraceFile(): string {
+  return process.env.MEMORA_TRACE_FILE || "";
+}
+
+function traceWrite(event: string, payload: any) {
+  // Write if a trace file is configured, regardless of MEMORA_QUERY_TRACE
+  const file = currentTraceFile();
+  if (!file) return;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(
+      file,
+      JSON.stringify({ ts: new Date().toISOString(), event, ...payload }) + "\n"
+    );
+  } catch {
+    // ignore
+  }
+}
+
+// Environment snapshot from memory route module to verify TRACE_FILE visibility
+try {
+  traceWrite("env.snapshot.memory", {
+    cwd: process.cwd(),
+    MODULE: "routes/memory",
+    MEMORA_TRACE_FILE: currentTraceFile() || "unset",
+    MEMORA_EPI_PREFIX: process.env.MEMORA_EPI_PREFIX || "unset"
+  });
+} catch {
+  // ignore
+}
 
 // Idempotency and backpressure knobs
 const IDEMP_INDEX = process.env.MEMORA_IDEMP_INDEX || "mem-idempotency";
@@ -121,6 +153,16 @@ async function handleWrite(req: any) {
     body: flattenEventForIndex(event),
     refresh: true
   });
+  try {
+    traceWrite("episodic.write", {
+      index: episodicIndex,
+      id: event.event_id,
+      tags: event.tags,
+      context: event.context
+    });
+  } catch {
+    // ignore
+  }
 
   // 2) Salience → semantic chunks + facts
   const atoms = atomicSplit(event.content);
@@ -223,6 +265,7 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
   const budget = q.budget ?? DEFAULT_BUDGET;
   const t0 = Date.now();
   log("retrieve.begin", { budget, scopes: q.filters?.scope ?? ["this_task", "project"] });
+  traceWrite("retrieve.begin", { budget, scopes: q.filters?.scope ?? ["this_task", "project"], objective: q.objective });
 
   // Build filter options shared across searches
   const fopts: FilterOptions = {
@@ -263,7 +306,7 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
       rrfK: getPolicy("fusion.rrf_k", 60),
       normalizeScores: true,
       mmr: {
-        enabled: true,
+        enabled: !isTemporalQuery(q.objective),
         lambda: getPolicy("diversity.lambda", 0.7),
         minDistance: getPolicy("diversity.min_distance", 0.2),
         maxPerTag: getPolicy("diversity.max_per_tag", 3)
@@ -301,6 +344,7 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
   }));
 
   log("retrieve.end", { totalMs: Date.now() - t0, snippets: snippets.length });
+  traceWrite("retrieve.end", { totalMs: Date.now() - t0, snippets: snippets.length });
   return { snippets };
 }
 
@@ -387,15 +431,13 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
   const useShingles = retrievalBoolean("lexical.use_shingles", true);
   const fields = [
     "content^3",
-    ...(useShingles ? ["content.shingles^1.2"] : []),
-    "tags^2",
-    "artifacts^1",
-    "content.raw^0.5"
+    ...(useShingles ? ["content.shingles^1.2"] : [])
   ];
   const mmType = retrievalString("lexical.multi_match_type", "best_fields");
   const tieBreaker = retrievalNumber("lexical.tie_breaker", 0.3);
   const msmPct = retrievalNumber("lexical.min_should_match_pct", 60);
-  const msm = computedMinShouldMatch(String(q.objective ?? ""), msmPct);
+  const isTemporal = isTemporalQuery(String(q.objective ?? ""));
+  const msm = isTemporal ? null : computedMinShouldMatch(String(q.objective ?? ""), msmPct);
 
   const mmClause: any = {
     multi_match: {
@@ -403,6 +445,7 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
       type: mmType,
       fields,
       tie_breaker: tieBreaker,
+      lenient: true,
       ...(msm ? { minimum_should_match: msm } : {})
     }
   };
@@ -424,13 +467,36 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
   const tdHalfLife = retrievalNumber("time_decay.episodic.half_life_days", 45);
   const tdWeight = retrievalNumber("time_decay.episodic.weight", 0.25);
 
-  const boolQuery: any = {
-    bool: {
-      must: [mmClause],
-      filter: filter.bool.filter,
-      must_not: filter.bool.must_not
-    }
-  };
+  const shouldClauses: any[] = isTemporal
+    ? [
+        {
+          simple_query_string: {
+            query:
+              "day OR days OR week OR weeks OR month OR months OR jan* OR feb* OR mar* OR apr* OR may OR jun* OR jul* OR aug* OR sep* OR oct* OR nov* OR dec* OR /",
+            fields: ["content^1", "content.raw^0.5"]
+          }
+        }
+      ]
+    : [];
+  const boolQuery: any = isTemporal
+    ? {
+        bool: {
+          // For temporal queries, allow either the question tokens OR date/number patterns to match
+          should: [mmClause, ...shouldClauses],
+          minimum_should_match: 1,
+          must: filter.bool.must || [],
+          filter: filter.bool.filter,
+          must_not: filter.bool.must_not
+        }
+      }
+    : {
+        bool: {
+          must: [mmClause, ...(filter.bool.must || [])],
+          ...(shouldClauses.length ? { should: shouldClauses } : {}),
+          filter: filter.bool.filter,
+          must_not: filter.bool.must_not
+        }
+      };
 
   const body = tdEnabled ? {
     size: getPolicy("stages.episodic.top_k", 25),
@@ -452,7 +518,38 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
     query: boolQuery
   };
 
+  {
+    const sizeForLog = getPolicy("stages.episodic.top_k", 25);
+    try {
+      const payload = {
+        prefix: EPISODIC_PREFIX,
+        index: `${EPISODIC_PREFIX}*`,
+        isTemporal,
+        tdEnabled,
+        size: sizeForLog,
+        filter: filter.bool,
+        query: boolQuery
+      };
+      log("episodic.request", payload);
+      traceWrite("episodic.request", payload);
+    } catch {
+      // best-effort logging
+    }
+  }
   const resp = await searchWithRetries({ index: `${EPISODIC_PREFIX}*`, body });
+  {
+    try {
+      const hits: any[] = resp?.body?.hits?.hits || [];
+      traceWrite("episodic.response", {
+        took: resp?.body?.took,
+        total: (resp?.body?.hits as any)?.total ?? null,
+        count: hits.length,
+        sample: hits.slice(0, 3).map(h => ({ id: h?._id, score: h?._score }))
+      });
+    } catch {
+      // best-effort logging
+    }
+  }
   return (resp.body.hits?.hits || []).map((hit: any, i: number) => ({
     id: `evt:${hit._id}`,
     text: hit._source?.content || "",
@@ -640,6 +737,12 @@ function computedMinShouldMatch(q: string, pct: number): string | null {
     return `${p}%`;
   }
   return null;
+}
+
+/** Heuristic: detect temporal counting questions where MMR should be disabled and date-bearing text boosted */
+function isTemporalQuery(q: string | undefined): boolean {
+  const s = (q || "").toLowerCase();
+  return /\b(how many days?|days? between|how long|number of days?|time difference|days? from|days? until|how many weeks?)\b/.test(s);
 }
 
 /**
