@@ -248,4 +248,5 @@ Manual single-run (no scenarios)
   - bash scripts/dev/update_semantic_ef_search.sh 200
 - Notes:
   - You can also run: npm run dev:tune:small to execute a predefined scenario sweep.
+  - Or run the fusion+rerank sweep: npm run dev:tune:fusion (scenarios in scripts/dev/scenarios/retrieval_sweep.fusion_rerank.json; requires OPENSEARCH_ML_RERANK_MODEL_ID set)
   - Restart the service if you changed config/retrieval.yaml (config is cached at runtime).

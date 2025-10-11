@@ -41,7 +41,8 @@
     "bench:locomo:score": "node --import ./scripts/register-ts-node.mjs benchmarks/runners/score_locomo.ts",
     "bench:locomo:run": "bash benchmarks/runners/run_locomo.sh",
     "dev:tune": "node scripts/dev/tune_retrieval.mjs",
-    "dev:tune:small": "node scripts/dev/tune_retrieval.mjs --scenarios scripts/dev/scenarios/retrieval_sweep.small.json --dataset benchmarks/LongMemEval/data/longmemeval_oracle.json --seed 42"
+    "dev:tune:small": "node scripts/dev/tune_retrieval.mjs --scenarios scripts/dev/scenarios/retrieval_sweep.small.json --dataset benchmarks/LongMemEval/data/longmemeval_oracle.json --seed 42",
+    "dev:tune:fusion": "node scripts/dev/tune_retrieval.mjs --scenarios scripts/dev/scenarios/retrieval_sweep.fusion_rerank.json --dataset benchmarks/LongMemEval/data/longmemeval_oracle.json --seed 42"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.19.1",
