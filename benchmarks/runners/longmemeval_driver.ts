@@ -499,6 +499,8 @@ async function main() {
       return;
     }
 
+    // Ensure active context is set for this process; memory.retrieve requires it
+    await mcpClient.callTool("context.set_context", ctxParams);
     const adapter = new MemoryAdapter(mcpClient);
 
     // Iterate dataset: enqueue sessions into Memora, then answer question (stub until LLM is wired)

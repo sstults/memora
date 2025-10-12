@@ -189,5 +189,26 @@ export async function searchWithRetries(params: Parameters<Client["search"]>[0],
 /** Convenience index with retries. */
 export async function indexWithRetries(params: Parameters<Client["index"]>[0], attempts = 3) {
   const client = getClient();
-  return withRetries(() => client.index(params as any), attempts);
+  try {
+    const idx: any = (params as any)?.index;
+    const id: any = (params as any)?.id;
+    const node = process.env.OPENSEARCH_URL || "http://localhost:9200";
+    log("index.request", { node, index: idx, id });
+    traceWrite("index.request", { node, index: idx, id });
+  } catch {
+    // best-effort logging
+  }
+  const res = await withRetries(() => client.index(params as any), attempts);
+  try {
+    const idx: any = (params as any)?.index;
+    const node = process.env.OPENSEARCH_URL || "http://localhost:9200";
+    const body = (res as any)?.body ?? res;
+    const statusCode = (res as any)?.statusCode ?? null;
+    const result = body?.result ?? null;
+    const _id = body?._id ?? null;
+    traceWrite("index.response", { node, index: idx, id: _id, result, statusCode });
+  } catch {
+    // ignore
+  }
+  return res;
 }

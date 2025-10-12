@@ -224,7 +224,13 @@ export function registerMemory(server: any) {
       task_id: z.string().optional().describe("Task identifier"),
       artifacts: z.array(z.string()).optional().describe("Optional artifact identifiers"),
       hash: z.string().optional().describe("Optional hash for idempotency"),
-      ts: z.string().optional().describe("ISO timestamp override")
+      ts: z.string().optional().describe("ISO timestamp override"),
+      // Optional context override when no active context is set in-process
+      tenant_id: z.string().optional().describe("Optional: provide when no active context is set"),
+      project_id: z.string().optional().describe("Optional: provide when no active context is set"),
+      context_id: z.string().optional().describe("Optional context identifier"),
+      env: z.string().optional(),
+      api_version: z.string().optional()
     },
     async (args: any) => {
       return handleWrite({ params: args });
@@ -344,9 +350,37 @@ async function handleWrite(req: any) {
   } catch {
     // ignore
   }
-  const ctx = requireContext();
+  let ctx: Context;
+  try {
+    ctx = requireContext();
+  } catch {
+    const p: any = (req as any)?.params || {};
+    if (!p?.tenant_id || !p?.project_id) {
+      try { traceWrite("write.context_missing", { reason: "no_active_context_and_no_args" }); } catch { /* noop */ void 0; }
+      throw new Error("No active context set. Provide tenant_id and project_id to memory.write or call context.set_context first.");
+    }
+    ctx = {
+      tenant_id: String(p.tenant_id),
+      project_id: String(p.project_id),
+      context_id: (p.context_id as any) ?? null,
+      task_id: (p.task_id as any) ?? null,
+      env: p.env ?? undefined,
+      api_version: p.api_version ?? undefined
+    } as Context;
+    try { traceWrite("write.context_fallback", { tenant_id: ctx.tenant_id, project_id: ctx.project_id }); } catch { /* noop */ void 0; }
+  }
+  try {
+    traceWrite("write.post_context", {
+      tenant_id: ctx.tenant_id,
+      project_id: ctx.project_id,
+      context_id: ctx.context_id,
+      task_id: ctx.task_id
+    });
+  } catch {
+    // ignore
+  }
 
-  // Idempotency fast-path: if idempotency_key (or hash) provided, check cache/persistence
+  // Idempotency check (semantic/facts only) — episodic append always executes
   const idemRaw = req.params?.idempotency_key || req.params?.hash;
   const idemKey = idemRaw ? makeIdemKey({
     tenant_id: ctx.tenant_id,
@@ -355,27 +389,28 @@ async function handleWrite(req: any) {
     task_id: (req.params?.task_id ?? ctx.task_id ?? "")
   }, String(idemRaw)) : null;
 
+  let priorResult: { ok: boolean; event_id: string; semantic_upserts: number; facts_upserts: number } | null = null;
   if (idemKey) {
     const cached = idempotencyCache.get(idemKey);
     if (cached) {
       log("idempotency.cache_hit", { key: idemKey });
-      return cached.result;
-    }
-    // Optional persistent check (best-effort); if not found, proceed
-    try {
-      const resp = await searchWithRetries({
-        index: IDEMP_INDEX,
-        body: { size: 1, query: { ids: { values: [idemKey] } } }
-      });
-      const hit = resp?.body?.hits?.hits?.[0];
-      if (hit && hit._source?.result) {
-        log("idempotency.store_hit", { key: idemKey });
-        const result = hit._source.result;
-        idempotencyCache.set(idemKey, { result, ts: new Date().toISOString() });
-        return result;
+      priorResult = cached.result;
+    } else {
+      // Optional persistent check (best-effort); if not found, proceed
+      try {
+        const resp = await searchWithRetries({
+          index: IDEMP_INDEX,
+          body: { size: 1, query: { ids: { values: [idemKey] } } }
+        });
+        const hit = resp?.body?.hits?.hits?.[0];
+        if (hit && hit._source?.result) {
+          log("idempotency.store_hit", { key: idemKey });
+          priorResult = hit._source.result;
+          idempotencyCache.set(idemKey, { result: hit._source.result, ts: new Date().toISOString() });
+        }
+      } catch (e) {
+        log("idempotency.lookup_error", { err: String(e) });
       }
-    } catch (e) {
-      log("idempotency.lookup_error", { err: String(e) });
     }
   }
 
@@ -399,23 +434,59 @@ async function handleWrite(req: any) {
     }
   };
 
+  try {
+    traceWrite("write.event_built", { episodicIndex: dailyEpisodicIndex(), id: event.event_id, ts: event.ts });
+  } catch {
+    // ignore
+  }
+
   // 1) Write episodic (append-only)
   const episodicIndex = dailyEpisodicIndex();
-  await indexWithRetries({
-    index: episodicIndex,
-    id: event.event_id,
-    body: flattenEventForIndex(event),
-    refresh: true
-  });
+  // Trace request before attempting write
   try {
+    traceWrite("episodic.index.request", { index: episodicIndex, id: event.event_id });
+  } catch {
+    // ignore
+  }
+  // Wrap indexing in try/catch to trace failures as well
+  try {
+    const FORCE_DIRECT = (process.env.MEMORA_FORCE_EPI_DIRECT_WRITE || "") === "1";
+    if (FORCE_DIRECT) {
+      const client = getClient();
+      await withRetries(() => client.index({
+        index: episodicIndex,
+        id: event.event_id,
+        body: flattenEventForIndex(event),
+        refresh: true
+      } as any));
+    } else {
+      await indexWithRetries({
+        index: episodicIndex,
+        id: event.event_id,
+        body: flattenEventForIndex(event),
+        refresh: true
+      });
+    }
+    traceWrite("episodic.index.ok", { index: episodicIndex, id: event.event_id });
+    // Back-compat event
     traceWrite("episodic.write", {
       index: episodicIndex,
       id: event.event_id,
       tags: event.tags,
       context: event.context
     });
-  } catch {
-    // ignore
+  } catch (e) {
+    try {
+      traceWrite("episodic.index.fail", { index: episodicIndex, id: event.event_id, error: String(e) });
+    } catch {
+      // ignore
+    }
+    throw e;
+  }
+
+  // If we have a prior idempotent result, skip semantic/facts upserts but keep episodic append
+  if (priorResult) {
+    return { ok: true, event_id: event.event_id, semantic_upserts: priorResult.semantic_upserts, facts_upserts: priorResult.facts_upserts };
   }
 
   // 2) Salience → semantic chunks + facts
@@ -583,10 +654,10 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
   // Trace around context acquisition to diagnose early exits
   try {
     traceWrite("retrieve.pre_context", {});
-  } catch { /* ignore */ }
+  } catch { /* ignore */ void 0; }
 
   const active: Context = requireContext();
-  try { traceWrite("retrieve.post_context", {}); } catch { /* ignore */ }
+  try { traceWrite("retrieve.post_context", {}); } catch { /* ignore */ void 0; }
 
   const q = req.params as RetrievalQuery;
   const q2 = q as RetrievalQuery;
@@ -1161,7 +1232,7 @@ async function handleWriteIfSalient(req: any) {
 
   // Delegate to canonical write
   const res = await handleWrite(req);
-  return { ok: true, written: true, ...res };
+  return { ...res, written: true };
 }
 
 /**
