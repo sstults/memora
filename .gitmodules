@@ -1,3 +1,4 @@
 [submodule "benchmarks/LongMemEval"]
 	path = benchmarks/LongMemEval
 	url = https://github.com/xiaowu0162/LongMemEval
+	ignore = untracked
