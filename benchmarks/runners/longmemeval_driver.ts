@@ -48,6 +48,10 @@ function parseArgs(argv: string[]) {
   let out = "benchmarks/reports/memora_predictions.jsonl";
   let variant: Variant = "C";
   let seed = 42;
+  let qids = "";
+  let replayMode: "write" | "salient" = "salient";
+  let budget = 20;
+  let scopeProject = 1;
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -59,9 +63,18 @@ function parseArgs(argv: string[]) {
       variant = argv[++i] as Variant;
     } else if (a === "--seed" && argv[i + 1]) {
       seed = Number(argv[++i]);
+    } else if (a === "--qids" && argv[i + 1]) {
+      qids = argv[++i];
+    } else if (a === "--replayMode" && argv[i + 1]) {
+      const v = argv[++i];
+      replayMode = v === "write" ? "write" : "salient";
+    } else if (a === "--budget" && argv[i + 1]) {
+      budget = Number(argv[++i]);
+    } else if (a === "--scopeProject" && argv[i + 1]) {
+      scopeProject = Number(argv[++i]);
     }
   }
-  return { dataset, out, variant, seed };
+  return { dataset, out, variant, seed, qids, replayMode, budget, scopeProject };
 }
 
 function ensureDirForFile(filePath: string) {
@@ -274,11 +287,14 @@ async function replaySessionsToMemora(
   qid: string,
   sessions: Turn[][],
   mode: "write" | "salient" = "salient"
-) {
+): Promise<{ attempted: number; written: number }> {
+  let attempted = 0;
+  let written = 0;
   for (const [sIdx, session] of sessions.entries()) {
     for (const [tIdx, turn] of session.entries()) {
       const text = (turn.content ?? turn.text ?? "").toString();
       if (!text || !text.trim()) continue;
+      attempted++;
       try {
         const common = {
           tags: ["bench", "longmemeval", `seed:${seed}`, `variant:${variant}`, `qid:${qid}`, `session:${sIdx}`, `turn:${tIdx}`],
@@ -290,24 +306,27 @@ async function replaySessionsToMemora(
             text,
             ...common
           });
+          written++;
         } else {
-          await adapter.writeIfSalient(
+          const wr = await adapter.writeIfSalient(
             {
               text,
               ...common
             },
             0.05 // low threshold to maximize recall
           );
+          if (wr?.data?.written) written++;
         }
       } catch {
         // Non-fatal for bench driver
       }
     }
   }
+  return { attempted, written };
 }
 
 async function main() {
-  const { dataset, out, variant, seed } = parseArgs(process.argv.slice(2));
+  const { dataset, out, variant, seed, qids, replayMode, budget, scopeProject } = parseArgs(process.argv.slice(2));
   ensureDirForFile(out);
 
   // Write a header for traceability
@@ -332,6 +351,15 @@ async function main() {
   } catch (err: any) {
     writeJSONL(out, { ts: new Date().toISOString(), op: "error", stage: "load_dataset", message: String(err?.message ?? err) });
     throw err;
+  }
+
+  // Optional filter: include only specified question IDs
+  const qidList = (qids || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (qidList.length > 0) {
+    const qset = new Set(qidList);
+    const before = examples.length;
+    examples = examples.filter((ex, idx) => qset.has(extractQuestionId(ex, idx)));
+    writeJSONL(out, { ts: new Date().toISOString(), op: "filter", include_qids: qidList, before, after: examples.length });
   }
 
   // Variants A and B baselines (no Memora policies)
@@ -481,17 +509,17 @@ async function main() {
       const question = extractQuestion(ex);
 
       try {
-        await replaySessionsToMemora(adapter, seed, variant, qid, sessions, "salient");
+        const replayStats = await replaySessionsToMemora(adapter, seed, variant, qid, sessions, replayMode);
+        writeJSONL(out, { ts: new Date().toISOString(), op: "diag", stage: "replay", qid, mode: replayMode, attempted: replayStats.attempted, written: replayStats.written });
       } catch (err: any) {
         writeJSONL(out, { ts: new Date().toISOString(), op: "warn", stage: "replay_sessions", qid, error: String(err?.message ?? err) });
       }
 
       // Retrieve memory context for the question with expanded budget and tags
       try {
-        const filtersC: { scope: Scope[] } = {
-          scope: ["this_task", "project"]
-        };
-        await adapter.search(question || "question", 20, filtersC, { task_id: `longmemeval-${seed}` });
+        const scopes: Scope[] = scopeProject ? ["this_task", "project"] : ["this_task"];
+        const filtersC: { scope: Scope[] } = { scope: scopes };
+        await adapter.search(question || "question", budget, filtersC, { task_id: `longmemeval-${seed}` });
       } catch {
         // retrieval failures are non-fatal for emitting a stub prediction
       }
@@ -501,10 +529,9 @@ async function main() {
       let tokens_out: number | null = null;
       let llm_latency_ms: number | null = null;
       try {
-        const kC = 20;
-        const filtersC: { scope: Scope[] } = {
-          scope: ["this_task", "project"]
-        };
+        const kC = budget;
+        const scopes: Scope[] = scopeProject ? ["this_task", "project"] : ["this_task"];
+        const filtersC: { scope: Scope[] } = { scope: scopes };
         const recentText = buildRecentTurnsText(sessions);
         const pack = await adapter.pack(
           question || "question",
@@ -514,6 +541,8 @@ async function main() {
           { task_id: `longmemeval-${seed}` }
         );
         const contextText = pack?.data?.packed ?? "";
+        const packSnippets = Array.isArray(pack?.data?.snippets) ? pack.data.snippets.length : 0;
+        writeJSONL(out, { ts: new Date().toISOString(), op: "diag", stage: "pack", qid, k: kC, scope: scopes, snippets: packSnippets, packed_len: contextText.length });
         if (openai) {
           const result = await answerWithOpenAI(openai, llmCfg, question || "", contextText);
           hypothesis = result.text;
