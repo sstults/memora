@@ -45,13 +45,31 @@ export class MemoryAdapter {
   // Write always persists to episodic; semantic/facts are gated by salience policies server-side
   async write(item: WriteItem): Promise<Telemetry<{ id: string; semantic_upserts: number; facts_upserts: number }>> {
     const t0 = performance.now();
+
+    // Try to pull active context from the server; include it in write as a fallback
+    // so writes succeed even if the server hasn't captured context in-process.
+    let ctx: any = undefined;
+    try {
+      const ctxRes = await this.mcp.callTool("context.get_context");
+      ctx = ctxRes?.ok ? ctxRes?.context : undefined;
+    } catch {
+      // ignore; no context available
+    }
+
     const res = await this.mcp.callTool("memory.write", {
       role: item.role ?? "tool",
       content: item.text,
       tags: item.tags,
       idempotency_key: item.idempotency_key,
       scope: item.scope,
-      task_id: item.task_id
+      task_id: item.task_id,
+      ...(ctx ? {
+        tenant_id: ctx.tenant_id,
+        project_id: ctx.project_id,
+        context_id: ctx.context_id,
+        env: ctx.env,
+        api_version: ctx.api_version
+      } : {})
     });
     return {
       data: {
@@ -66,6 +84,16 @@ export class MemoryAdapter {
   // Salience pre-check: only writes when content has a salient atom
   async writeIfSalient(item: WriteItem, min_score_override?: number): Promise<Telemetry<{ written: boolean; id?: string }>> {
     const t0 = performance.now();
+
+    // Include active context (if available) to ensure writes don't fail when server-side context is missing
+    let ctx: any = undefined;
+    try {
+      const ctxRes = await this.mcp.callTool("context.get_context");
+      ctx = ctxRes?.ok ? ctxRes?.context : undefined;
+    } catch {
+      // ignore
+    }
+
     const res = await this.mcp.callTool("memory.write_if_salient", {
       role: item.role ?? "tool",
       content: item.text,
@@ -73,7 +101,14 @@ export class MemoryAdapter {
       idempotency_key: item.idempotency_key,
       scope: item.scope,
       task_id: item.task_id,
-      min_score_override
+      min_score_override,
+      ...(ctx ? {
+        tenant_id: ctx.tenant_id,
+        project_id: ctx.project_id,
+        context_id: ctx.context_id,
+        env: ctx.env,
+        api_version: ctx.api_version
+      } : {})
     });
     return {
       data: { written: !!res.written, id: res.event_id },
