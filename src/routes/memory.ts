@@ -12,6 +12,7 @@ import { policyNumber, policyArray, retrievalNumber, retrievalArray, retrievalBo
 import { packPrompt } from "../services/packer.js";
 import fs from "node:fs";
 import path from "node:path";
+import { z } from "zod";
 
 import { requireContext } from "./context.js";
 import { buildBoolFilter, FilterOptions } from "../domain/filters.js";
@@ -75,21 +76,192 @@ const MAX_CHUNKS = Number(process.env.MEMORA_WRITE_MAX_CHUNKS || 64);
 // In-process cache as a fast path for idempotency (persists per process)
 const idempotencyCache = new Map<string, { result: { ok: boolean; event_id: string; semantic_upserts: number; facts_upserts: number }; ts: string }>();
 
+// Normalize various SDK request shapes into a flat params object.
+// Supports: req.params, req.arguments, nested { params: {...} } / { arguments: {...} }, or when req itself is the params object.
+function normalizeParamsContainer(raw: any): any {
+  const req = raw || {};
+  const isObj = (v: any) => v && typeof v === "object" && !Array.isArray(v);
+  const parseIfJson = (v: any) => {
+    if (typeof v === "string") {
+      try { return JSON.parse(v); } catch { return {}; }
+    }
+    return v;
+  };
+
+  // Prefer explicit "arguments" from MCP request
+  if ((req as any).arguments !== undefined) {
+    const a = (req as any).arguments;
+    return isObj(a) ? a : parseIfJson(a);
+  }
+
+  // If "params" exists and looks like a plain args object (not the whole SDK request), use/unwrap it
+  if ((req as any).params !== undefined && !("sendRequest" in (req as any).params) && !("requestInfo" in (req as any).params)) {
+    let p: any = (req as any).params;
+    p = parseIfJson(p);
+    if ((p as any)?.arguments !== undefined) {
+      const a = (p as any).arguments;
+      return isObj(a) ? a : parseIfJson(a);
+    }
+    if ((p as any)?.params !== undefined) {
+      const pp = (p as any).params;
+      return isObj(pp) ? pp : parseIfJson(pp);
+    }
+    return isObj(p) ? p : {};
+  }
+
+  // SDK envelope: requestInfo.params or requestInfo.arguments
+  if (isObj((req as any).requestInfo)) {
+    const ri: any = (req as any).requestInfo;
+    if (ri?.params !== undefined) {
+      const v = ri.params;
+      return isObj(v) ? v : parseIfJson(v);
+    }
+    if (ri?.arguments !== undefined) {
+      const v = ri.arguments;
+      return isObj(v) ? v : parseIfJson(v);
+    }
+  }
+
+  // Some servers put the SDK envelope under req.params (so path becomes req.params.requestInfo.{params|arguments})
+  if ((req as any).params !== undefined) {
+    const rpAny: any = (req as any).params;
+    const rp = isObj(rpAny) ? rpAny : parseIfJson(rpAny);
+    if (isObj(rp)) {
+      if (isObj(rp.requestInfo)) {
+        const rpi: any = rp.requestInfo;
+        if (rpi?.params !== undefined) {
+          const v = rpi.params;
+          return isObj(v) ? v : parseIfJson(v);
+        }
+        if (rpi?.arguments !== undefined) {
+          const v = rpi.arguments;
+          return isObj(v) ? v : parseIfJson(v);
+        }
+      }
+      if (rp?.arguments !== undefined) {
+        const v = rp.arguments;
+        return isObj(v) ? v : parseIfJson(v);
+      }
+      if (rp?.params !== undefined) {
+        const v = rp.params;
+        return isObj(v) ? v : parseIfJson(v);
+      }
+      if (rp?.body !== undefined) {
+        const v = rp.body;
+        return isObj(v) ? v : parseIfJson(v);
+      }
+      if (rp?.data !== undefined) {
+        const v = rp.data;
+        return isObj(v) ? v : parseIfJson(v);
+      }
+    }
+  }
+
+  // Some SDKs wrap twice: req.params.params or req.params.arguments
+  if ((req as any).params !== undefined) {
+    const rpAny: any = (req as any).params;
+    const rp = isObj(rpAny) ? rpAny : parseIfJson(rpAny);
+    if (isObj(rp)) {
+      if (rp?.params !== undefined) {
+        const v = rp.params;
+        return isObj(v) ? v : parseIfJson(v);
+      }
+      if (rp?.arguments !== undefined) {
+        const v = rp.arguments;
+        return isObj(v) ? v : parseIfJson(v);
+      }
+    }
+  }
+
+  // SDK meta envelope: req._meta.request.{arguments|params} or req._meta.{arguments|params}
+  if (isObj((req as any)._meta)) {
+    const meta: any = (req as any)._meta;
+    if (isObj(meta.request)) {
+      const rq: any = meta.request;
+      if (rq?.arguments !== undefined) {
+        const v = rq.arguments;
+        return isObj(v) ? v : parseIfJson(v);
+      }
+      if (rq?.params !== undefined) {
+        const v = rq.params;
+        return isObj(v) ? v : parseIfJson(v);
+      }
+    }
+    if (meta?.arguments !== undefined) {
+      const v = meta.arguments;
+      return isObj(v) ? v : parseIfJson(v);
+    }
+    if (meta?.params !== undefined) {
+      const v = meta.params;
+      return isObj(v) ? v : parseIfJson(v);
+    }
+  }
+
+  // Last resort: if raw itself looks like an args object or is a JSON string of it
+  if (typeof req === "string") {
+    const parsed = parseIfJson(req);
+    if (isObj(parsed)) return parsed;
+  }
+  if (isObj(req) && ("objective" in req || "budget" in req || "filters" in req || "to_scope" in req || "content" in req)) {
+    return req;
+  }
+
+  return {};
+}
+
 // ---- Public registration ----
 export function registerMemory(server: any) {
+  // Register handlers directly; pass raw request for write, and schema-bound args for retrieve (SDK three-arg signature)
   server.tool("memory.write", handleWrite);
-  server.tool("memory.retrieve", handleRetrieve);
+  // Fallback to standard registration to avoid SDK signature mismatches; normalization inside handleRetrieve covers envelopes
+  server.tool(
+    "memory.retrieve",
+    "Retrieve memories by fusing episodic (BM25), semantic (k-NN), and facts; optional rerank and diversification.",
+    {
+      objective: z.string().describe("Natural-language query objective"),
+      budget: z.number().optional().describe("Max number of items to return (top-K budget)"),
+      filters: z.object({
+        scope: z.array(z.string()).optional().describe("Scopes to search e.g., ['this_task','project']"),
+        tags: z.array(z.string()).optional().describe("Optional tag filters"),
+        api_version: z.string().optional(),
+        env: z.string().optional()
+      }).optional(),
+      context_id: z.string().optional(),
+      task_id: z.string().optional()
+    },
+    async (args: any) => {
+      return handleRetrieve({ params: args });
+    }
+  );
   server.tool("memory.promote", handlePromote);
   // New agent-ergonomic tools
   server.tool("memory.write_if_salient", handleWriteIfSalient);
   server.tool("memory.retrieve_and_pack", handleRetrieveAndPack);
   server.tool("memory.autopromote", handleAutoPromote);
+
+  // Diagnostics: confirm tools registered in this process
+  try {
+    traceWrite("memory.tools_registered", {
+      tools: ["memory.write","memory.retrieve","memory.promote","memory.write_if_salient","memory.retrieve_and_pack","memory.autopromote"]
+    });
+  } catch {
+    // ignore
+  }
 }
 
 // =========================
 // memory.write
 // =========================
 async function handleWrite(req: any) {
+  // Use SDK-provided params when present; otherwise normalize from envelope
+  if (!(req as any)?.params || (typeof (req as any).params === "object" && Object.keys((req as any).params || {}).length === 0)) {
+    (req as any).params = normalizeParamsContainer(req);
+  }
+  try {
+    traceWrite("write.params", { keys: Object.keys((req as any)?.params || []) });
+  } catch {
+    // ignore
+  }
   const ctx = requireContext();
 
   // Idempotency fast-path: if idempotency_key (or hash) provided, check cache/persistence
@@ -259,13 +431,107 @@ async function handleWrite(req: any) {
  */
 // =========================
 async function handleRetrieve(req: any): Promise<RetrievalResult> {
-  const active = requireContext();
+  // Prefer SDK-provided params; only normalize if missing/empty
+  const incoming = (req as any)?.params;
+  let normalizedParams: any = undefined;
+
+  // Detect when req.params is actually the SDK envelope (not user arguments)
+  const looksLikeEnvelope =
+    incoming && typeof incoming === "object" &&
+    ("sendRequest" in incoming || "requestInfo" in incoming || "sessionId" in incoming || "signal" in incoming || "_meta" in incoming);
+
+  if (incoming && typeof incoming === "object" && Object.keys(incoming).length > 0 && !looksLikeEnvelope) {
+    // params already looks like plain user args
+    normalizedParams = incoming;
+  } else if (incoming && looksLikeEnvelope) {
+    // Extract from the envelope first
+    normalizedParams = normalizeParamsContainer(incoming);
+  }
+
+  // Fallback: extract from the whole request envelope (req.arguments, req.requestInfo, etc.)
+  if (!normalizedParams || Object.keys(normalizedParams || {}).length === 0) {
+    normalizedParams = normalizeParamsContainer(req);
+  }
+
+
+  (req as any).params = normalizedParams;
+
+  // Early trace to confirm entry into handler (post-normalization)
+  try {
+    const hasParams = normalizedParams && typeof normalizedParams === "object" && Object.keys(normalizedParams).length > 0;
+    traceWrite("retrieve.enter", { hasParams, keys: Object.keys((req as any)?.params || []), objective: String((req as any)?.params?.objective ?? "") });
+  } catch {
+    // ignore
+  }
+  // Log a compact sample of normalized params to verify objective/budget/filters visibility
+  try {
+    const p: any = (req as any)?.params || {};
+    const hasObjective = typeof (p as any)?.objective !== "undefined";
+    const hasBudget = typeof (p as any)?.budget !== "undefined";
+    const hasFilters = typeof (p as any)?.filters !== "undefined";
+    traceWrite("retrieve.params", {
+      hasObjective,
+      hasBudget,
+      hasFilters,
+      objectiveType: typeof p.objective,
+      budgetType: typeof p.budget,
+      filtersType: typeof p.filters,
+      objectivePreview: typeof p.objective === "string" ? String(p.objective).slice(0, 120) : null
+    });
+  } catch {
+    // ignore
+  }
+
+// Additional deep-diagnostic to detect non-plain argument containers
+  try {
+    const rp: any = (req as any);
+    const diag: any = {
+      hasReqParamsKey: Object.prototype.hasOwnProperty.call(rp, "params"),
+      typeReqParams: typeof rp?.params,
+      hasReqArgumentsKey: Object.prototype.hasOwnProperty.call(rp, "arguments"),
+      typeReqArguments: typeof rp?.arguments,
+      hasReqRequestInfo: Object.prototype.hasOwnProperty.call(rp, "requestInfo"),
+      typeReqRequestInfo: typeof rp?.requestInfo
+    };
+    traceWrite("retrieve.diag", diag);
+  } catch {
+    // ignore
+  }
+
+  // Trace around context acquisition to diagnose early exits
+  try {
+    traceWrite("retrieve.pre_context", {});
+  } catch { /* ignore */ }
+
+  const active: Context = requireContext();
+  try { traceWrite("retrieve.post_context", {}); } catch { /* ignore */ }
 
   const q = req.params as RetrievalQuery;
-  const budget = q.budget ?? DEFAULT_BUDGET;
+  const q2 = q as RetrievalQuery;
+
+  const budget = q2.budget ?? DEFAULT_BUDGET;
   const t0 = Date.now();
-  log("retrieve.begin", { budget, scopes: q.filters?.scope ?? ["this_task", "project"] });
-  traceWrite("retrieve.begin", { budget, scopes: q.filters?.scope ?? ["this_task", "project"], objective: q.objective });
+
+  // Checkpoint before begin to confirm q2 content
+  try {
+    traceWrite("retrieve.ckpt", {
+      stage: "pre_begin",
+      qKeys: Object.keys(q2 || {}),
+      objectivePreview: typeof q2.objective === "string" ? q2.objective.slice(0, 120) : null
+    });
+  } catch {
+    // ignore
+  }
+
+  log("retrieve.begin", { budget, scopes: q2.filters?.scope ?? ["this_task", "project"] });
+  traceWrite("retrieve.begin", { budget, scopes: q2.filters?.scope ?? ["this_task", "project"], objective: q2.objective });
+
+  // Checkpoint after begin
+  try {
+    traceWrite("retrieve.ckpt", { stage: "post_begin" });
+  } catch {
+    // ignore
+  }
 
   // Build filter options shared across searches
   const fopts: FilterOptions = {
@@ -283,17 +549,17 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
 
   // Stage A: Episodic (BM25 / match)
   const tE = Date.now();
-  const episodicHits = await episodicSearch(q, fopts);
+  const episodicHits = await episodicSearch(q2, fopts);
   log("stage.episodic", { hits: episodicHits.length, tookMs: Date.now() - tE });
 
   // Stage B: Semantic (k-NN + filters)
   const tS = Date.now();
-  const semanticHits = await semanticSearch(q, fopts);
+  const semanticHits = await semanticSearch(q2, fopts);
   log("stage.semantic", { hits: semanticHits.length, tookMs: Date.now() - tS });
 
   // Stage C: Facts (1–2 hop expansion)
   const tF = Date.now();
-  const factHits = await factsSearch(q, fopts);
+  const factHits = await factsSearch(q2, fopts);
   log("stage.facts", { hits: factHits.length, tookMs: Date.now() - tF });
 
   // Fuse + optional rerank
@@ -306,7 +572,7 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
       rrfK: getPolicy("fusion.rrf_k", 60),
       normalizeScores: true,
       mmr: {
-        enabled: !isTemporalQuery(q.objective),
+        enabled: !isTemporalQuery(q2.objective),
         lambda: getPolicy("diversity.lambda", 0.7),
         minDistance: getPolicy("diversity.min_distance", 0.2),
         maxPerTag: getPolicy("diversity.max_per_tag", 3)
@@ -319,7 +585,7 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
     const r0 = Date.now();
     const inCount = fused.length;
     log("rerank.start", { candidates: inCount });
-    fused = await crossRerank(q.objective, fused, {
+    fused = await crossRerank(q2.objective, fused, {
       maxCandidates: getPolicy("rerank.max_candidates", 64),
       budgetMs: getPolicy("rerank.budget_ms", 1000)
     });
@@ -427,6 +693,18 @@ function flattenFactForIndex(f: Fact) {
 
 // ---- Episodic BM25
 async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<FusedHit[]> {
+  // Diagnostic entry trace to verify function execution
+  try {
+    traceWrite("episodic.enter", { objective: q.objective });
+    const hbDir = path.join(process.cwd(), "outputs", "memora", "trace");
+    fs.mkdirSync(hbDir, { recursive: true });
+    fs.appendFileSync(
+      path.join(hbDir, "heartbeat.ndjson"),
+      JSON.stringify({ ts: new Date().toISOString(), event: "episodic.enter" }) + "\n"
+    );
+  } catch {
+    // ignore
+  }
   // Build lexical multi_match with optional shingles/keyword subfields and guardrails
   const useShingles = retrievalBoolean("lexical.use_shingles", true);
   const fields = [
@@ -809,6 +1087,8 @@ async function handleWriteIfSalient(req: any) {
  * Accepts optional sections: system, task_frame, tool_state, recent_turns (strings).
  */
 async function handleRetrieveAndPack(req: any) {
+  // Normalize MCP tool arguments
+  (req as any).params = normalizeParamsContainer(req);
   requireContext(); // ensure context set
   const rres = await handleRetrieve({ params: req.params });
 
@@ -839,6 +1119,8 @@ async function handleRetrieveAndPack(req: any) {
  * Request: { to_scope, limit?, sort_by? = "last_used", filters? }
  */
 async function handleAutoPromote(req: any) {
+  // Normalize MCP tool arguments
+  (req as any).params = normalizeParamsContainer(req);
   const client = getClient();
   const to_scope = req.params?.to_scope as Scope;
   if (!to_scope) throw new Error("memory.autopromote requires to_scope.");

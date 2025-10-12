@@ -8,6 +8,41 @@
  //   MEMORA_OS_CLIENT_TIMEOUT_MS=10000 (preferred; falls back to MEMORA_OS_REQUEST_TIMEOUT_MS)
 
 import { Client } from "@opensearch-project/opensearch";
+import { debug } from "./log.js";
+import fs from "node:fs";
+import path from "node:path";
+
+const log = debug("memora:os-client");
+const TRACE = (process.env.MEMORA_QUERY_TRACE || "").toLowerCase() === "true";
+const TRACE_FILE = process.env.MEMORA_TRACE_FILE || "";
+
+function traceWrite(event: string, payload: any) {
+  // Write if a trace file is configured, regardless of MEMORA_QUERY_TRACE
+  if (!TRACE_FILE) return;
+  try {
+    fs.mkdirSync(path.dirname(TRACE_FILE), { recursive: true });
+    fs.appendFileSync(
+      TRACE_FILE,
+      JSON.stringify({ ts: new Date().toISOString(), event, ...payload }) + "\n"
+    );
+  } catch {
+    // ignore
+  }
+}
+
+// Environment snapshot early to confirm env propagation when server boots
+try {
+  traceWrite("env.snapshot", {
+    cwd: process.cwd(),
+    OPENSEARCH_URL: process.env.OPENSEARCH_URL || "unset",
+    MEMORA_EPI_PREFIX: process.env.MEMORA_EPI_PREFIX || "unset",
+    DEBUG: process.env.DEBUG || "unset",
+    MEMORA_QUERY_TRACE: process.env.MEMORA_QUERY_TRACE || "unset",
+    MEMORA_TRACE_FILE: TRACE_FILE || "unset"
+  });
+} catch {
+  // ignore
+}
 
 let _client: Client | null = null;
 
@@ -32,6 +67,10 @@ export function getClient(): Client {
     opts.auth = { username, password };
   }
 
+  if (TRACE) {
+    log("client.init", { node, maxRetries, requestTimeout, rejectUnauthorized });
+    traceWrite("client.init", { node, maxRetries, requestTimeout, rejectUnauthorized });
+  }
   _client = new Client(opts);
   return _client;
 }
@@ -124,7 +163,27 @@ export async function withRetries<T>(fn: () => Promise<T>, attempts = 3, baseDel
 /** Convenience search with retries. */
 export async function searchWithRetries(params: Parameters<Client["search"]>[0], attempts = 3) {
   const client = getClient();
-  return withRetries(() => client.search(params as any), attempts);
+  try {
+    const idx: any = (params as any)?.index;
+    const body: any = (params as any)?.body;
+    const node = process.env.OPENSEARCH_URL || "http://localhost:9200";
+    log("search.request", { node, index: idx, body });
+    traceWrite("search.request", { node, index: idx, body });
+  } catch {
+    // best-effort logging
+  }
+  const res = await withRetries(() => client.search(params as any), attempts);
+  try {
+    const idx: any = (params as any)?.index;
+    const node = process.env.OPENSEARCH_URL || "http://localhost:9200";
+    const hits = (res as any)?.body?.hits?.hits ?? [];
+    const total = (res as any)?.body?.hits?.total ?? null;
+    const took = (res as any)?.body?.took ?? null;
+    traceWrite("search.response", { node, index: idx, took, total, count: Array.isArray(hits) ? hits.length : 0 });
+  } catch {
+    // ignore
+  }
+  return res;
 }
 
 /** Convenience index with retries. */

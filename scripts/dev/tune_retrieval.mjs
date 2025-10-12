@@ -31,6 +31,7 @@
  * - Outputs are written under benchmarks/reports/, with scenario name in filenames.
  */
 
+import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";

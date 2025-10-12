@@ -140,3 +140,4 @@ vite.config.ts.timestamp-*
 
 # Memora dev cache (model id, etc.)
 .memora/
+

@@ -9,8 +9,18 @@ let activeContext: Context | null = null;
 export function registerContext(server: any) {
   // Tool: set_context
   server.tool("context.set_context", async (req: any) => {
-    const ctx = req.params as Context;
-    if (!ctx.tenant_id || !ctx.project_id) {
+    const r: any = req || {};
+    const params = (r.params && Object.keys(r.params || {}).length > 0)
+      ? r.params
+      : (r.arguments && Object.keys(r.arguments || {}).length > 0)
+        ? r.arguments
+        : (r.requestInfo?.params && Object.keys(r.requestInfo.params || {}).length > 0)
+          ? r.requestInfo.params
+          : (r.requestInfo?.arguments && Object.keys(r.requestInfo.arguments || {}).length > 0)
+            ? r.requestInfo.arguments
+            : r;
+    const ctx = params as Context;
+    if (!ctx?.tenant_id || !ctx?.project_id) {
       throw new Error("tenant_id and project_id are required");
     }
     activeContext = ctx;
@@ -24,15 +34,25 @@ export function registerContext(server: any) {
     if (activeContext) {
       return { ok: true, context: activeContext, created: false };
     }
-    const incoming = req.params as Partial<Context>;
+    const r: any = req || {};
+    const params = (r.params && Object.keys(r.params || {}).length > 0)
+      ? r.params
+      : (r.arguments && Object.keys(r.arguments || {}).length > 0)
+        ? r.arguments
+        : (r.requestInfo?.params && Object.keys(r.requestInfo.params || {}).length > 0)
+          ? r.requestInfo.params
+          : (r.requestInfo?.arguments && Object.keys(r.requestInfo.arguments || {}).length > 0)
+            ? r.requestInfo.arguments
+            : r;
+    const incoming = params as Partial<Context>;
     if (!incoming?.tenant_id || !incoming?.project_id) {
       throw new Error("context.ensure_context requires tenant_id and project_id when no active context exists.");
     }
     activeContext = {
-      tenant_id: incoming.tenant_id,
-      project_id: incoming.project_id,
-      context_id: incoming.context_id ?? null as any,
-      task_id: incoming.task_id ?? null as any,
+      tenant_id: incoming.tenant_id!,
+      project_id: incoming.project_id!,
+      context_id: (incoming.context_id as any) ?? null,
+      task_id: (incoming.task_id as any) ?? null,
       env: incoming.env ?? undefined,
       api_version: incoming.api_version ?? undefined
     } as Context;

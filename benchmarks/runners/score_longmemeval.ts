@@ -99,7 +99,8 @@ async function main() {
   }
 
   // Normalize model tag: LongMemEval expects a supported model tag (e.g., "gpt-4o")
-  const modelTag = (tag === "memora" || tag === "default" || tag === "") ? "gpt-4o" : tag;
+  const allowedModels = new Set(["gpt-4o","gpt-4o-mini","gpt-4.1","gpt-4.1-mini"]);
+  const modelTag = (tag && allowedModels.has(tag)) ? tag : "gpt-4o";
   const resultRel = `${hypRel}.eval-results-${modelTag}`;
 
   // 1) Evaluate QA (produces .log alongside the predictions path)
