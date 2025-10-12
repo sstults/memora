@@ -212,7 +212,24 @@ function normalizeParamsContainer(raw: any): any {
 // ---- Public registration ----
 export function registerMemory(server: any) {
   // Register handlers directly; pass raw request for write, and schema-bound args for retrieve (SDK three-arg signature)
-  server.tool("memory.write", handleWrite);
+  server.tool(
+    "memory.write",
+    "Persist an event; always writes episodic, semantic/facts gated by salience.",
+    {
+      content: z.string().describe("Event content text"),
+      role: z.string().optional().describe("Role for the event, default 'tool'"),
+      tags: z.array(z.string()).optional().describe("Optional tags"),
+      idempotency_key: z.string().optional().describe("Idempotency key for de-duplication"),
+      scope: z.enum(["this_task", "project", "tenant"]).optional().describe("Scope for semantic chunks"),
+      task_id: z.string().optional().describe("Task identifier"),
+      artifacts: z.array(z.string()).optional().describe("Optional artifact identifiers"),
+      hash: z.string().optional().describe("Optional hash for idempotency"),
+      ts: z.string().optional().describe("ISO timestamp override")
+    },
+    async (args: any) => {
+      return handleWrite({ params: args });
+    }
+  );
   // Fallback to standard registration to avoid SDK signature mismatches; normalization inside handleRetrieve covers envelopes
   server.tool(
     "memory.retrieve",
@@ -233,11 +250,76 @@ export function registerMemory(server: any) {
       return handleRetrieve({ params: args });
     }
   );
-  server.tool("memory.promote", handlePromote);
+  server.tool(
+    "memory.promote",
+    "Promote a semantic memory to a broader scope.",
+    {
+      mem_id: z.string().describe("Semantic memory id (mem:<id> or <id>)"),
+      to_scope: z.enum(["this_task", "project", "tenant"]).describe("Target scope")
+    },
+    async (args: any) => {
+      return handlePromote({ params: args });
+    }
+  );
   // New agent-ergonomic tools
-  server.tool("memory.write_if_salient", handleWriteIfSalient);
-  server.tool("memory.retrieve_and_pack", handleRetrieveAndPack);
-  server.tool("memory.autopromote", handleAutoPromote);
+  server.tool(
+    "memory.write_if_salient",
+    "Write only if at least one salient atom passes threshold.",
+    {
+      content: z.string().describe("Event content text"),
+      role: z.string().optional(),
+      tags: z.array(z.string()).optional(),
+      idempotency_key: z.string().optional(),
+      scope: z.enum(["this_task", "project", "tenant"]).optional(),
+      task_id: z.string().optional(),
+      min_score_override: z.number().optional().describe("Override salience threshold for this call")
+    },
+    async (args: any) => {
+      return handleWriteIfSalient({ params: args });
+    }
+  );
+  server.tool(
+    "memory.retrieve_and_pack",
+    "Retrieve snippets and return a packed prompt using config/packing.yaml.",
+    {
+      objective: z.string().describe("Natural-language query objective"),
+      budget: z.number().optional().describe("Max number of items to return (top-K budget)"),
+      system: z.string().optional(),
+      task_frame: z.string().optional(),
+      tool_state: z.string().optional(),
+      recent_turns: z.string().optional(),
+      filters: z.object({
+        scope: z.array(z.string()).optional(),
+        tags: z.array(z.string()).optional(),
+        api_version: z.string().optional(),
+        env: z.string().optional()
+      }).optional(),
+      context_id: z.string().optional(),
+      task_id: z.string().optional()
+    },
+    async (args: any) => {
+      return handleRetrieveAndPack({ params: args });
+    }
+  );
+  server.tool(
+    "memory.autopromote",
+    "Promote top-N semantic memories to a target scope based on sort criteria.",
+    {
+      to_scope: z.enum(["this_task", "project", "tenant"]).describe("Target scope"),
+      limit: z.number().optional().describe("Number of items to promote (default 10)"),
+      sort_by: z.enum(["last_used", "salience"]).optional().describe("Sort criteria"),
+      filters: z.object({
+        context_id: z.string().optional(),
+        scope: z.array(z.string()).optional(),
+        tags: z.array(z.string()).optional(),
+        api_version: z.string().optional(),
+        env: z.string().optional()
+      }).optional()
+    },
+    async (args: any) => {
+      return handleAutoPromote({ params: args });
+    }
+  );
 
   // Diagnostics: confirm tools registered in this process
   try {
