@@ -732,8 +732,9 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
   const eopts: FilterOptions = {
     tenant_id: fopts.tenant_id,
     project_id: fopts.project_id,
-    context_id: fopts.context_id,
-    task_id: fopts.task_id,
+    // Relax episodic filters: omit context_id/task_id initially to ensure recall; add incrementally if needed
+    // context_id: fopts.context_id,
+    // task_id: fopts.task_id,
     tags: fopts.tags,
     exclude_tags: fopts.exclude_tags,
     recent_days: fopts.recent_days
