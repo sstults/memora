@@ -6,6 +6,44 @@ It is designed to support **long-running tasks, multi-project contexts, and coll
 
 ---
 
+> Branch notice: This branch (refactor/minimal-poc) implements the Minimal POC scope. Only episodic write and lexical BM25 retrieval are active by default. Semantic search, facts, fusion/RRF, diversity, rerank, and other non-critical features are isolated to feature branches or the archival branch. See "Branching model" below.
+
+### Minimal POC Quickstart (episodic-only)
+
+1) Start OpenSearch
+```bash
+docker compose -f docker/docker-compose.yml up -d
+```
+
+2) Configure environment
+```bash
+cp .env.example .env
+# Required for local Docker:
+export OPENSEARCH_URL=http://localhost:9200
+# On first run you can let Memora bootstrap episodic templates/indices:
+export MEMORA_BOOTSTRAP_OS=1
+```
+
+3) Start the MCP server
+```bash
+npm install
+npm run dev
+```
+
+4) Create episodic indices manually (optional alternative to MEMORA_BOOTSTRAP_OS)
+```bash
+./scripts/create_indices.sh
+```
+
+5) Minimal flow smoke
+- Set or ensure context via MCP: context.ensure_context
+- Write an event: memory.write
+- Retrieve episodic memories (BM25 only): memory.retrieve
+
+Notes:
+- Do not set embedding or rerank env vars on this branch; those features are off by default.
+- Integration/bench/ML-related scripts live on feature branches or the archival branch.
+
 ## Features
 
 - **Context Management**
