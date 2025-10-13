@@ -448,21 +448,36 @@ async function handleWrite(req: any) {
   // Wrap indexing in try/catch to trace failures as well
   try {
     const FORCE_DIRECT = (process.env.MEMORA_FORCE_EPI_DIRECT_WRITE || "") === "1";
+    let res: any;
     if (FORCE_DIRECT) {
       const client = getClient();
-      await withRetries(() => client.index({
+      res = await withRetries(() => client.index({
         index: episodicIndex,
         id: event.event_id,
         body: flattenEventForIndex(event),
         refresh: true
       } as any));
     } else {
-      await indexWithRetries({
+      res = await indexWithRetries({
         index: episodicIndex,
         id: event.event_id,
         body: flattenEventForIndex(event),
         refresh: true
       });
+    }
+    // Inspect result to assert success; surface failures in trace and throw
+    try {
+      const body = (res as any)?.body ?? res;
+      const statusCode = (res as any)?.statusCode ?? null;
+      const result = body?.result ?? null;
+      const _id = body?._id ?? event.event_id;
+      traceWrite("episodic.index.response", { index: episodicIndex, id: _id, result, statusCode });
+      if ((statusCode && Number(statusCode) >= 300) || (result && !["created", "updated"].includes(String(result)))) {
+        traceWrite("episodic.index.fail", { index: episodicIndex, id: _id, result, statusCode });
+        throw new Error(`Episodic index failed: status=${statusCode} result=${result}`);
+      }
+    } catch (inner) {
+      // If parsing failed, still continue to ok trace below; outer catch will handle thrown errors
     }
     traceWrite("episodic.index.ok", { index: episodicIndex, id: event.event_id });
     // Back-compat event
