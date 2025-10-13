@@ -489,7 +489,14 @@ async function handleWrite(req: any) {
     return { ok: true, event_id: event.event_id, semantic_upserts: priorResult.semantic_upserts, facts_upserts: priorResult.facts_upserts };
   }
 
-  // 2) Salience → semantic chunks + facts
+  // If both semantic and facts writes are disabled, end after episodic append
+  if (!retrievalBoolean("stages.semantic.enabled", false) && !retrievalBoolean("stages.facts.enabled", false)) {
+    return { ok: true, event_id: event.event_id, semantic_upserts: 0, facts_upserts: 0 };
+  }
+
+  // 2) Salience → semantic chunks + facts (gated by retrieval.yaml)
+  const WRITE_SEM_ENABLED = retrievalBoolean("stages.semantic.enabled", false);
+  const WRITE_FACTS_ENABLED = retrievalBoolean("stages.facts.enabled", false);
   const atoms = atomicSplit(event.content);
   const chunks: SemanticChunk[] = [];
   const facts: Fact[] = [];
@@ -499,8 +506,10 @@ async function handleWrite(req: any) {
     if (sal < getPolicy("salience.min_score", 0.6)) continue;
 
     // (a) facts (very light heuristic; your extractor can live in salience.ts)
-    const extractedFacts = extractFacts(a, event.context);
-    facts.push(...extractedFacts);
+    if (WRITE_FACTS_ENABLED) {
+      const extractedFacts = extractFacts(a, event.context);
+      facts.push(...extractedFacts);
+    }
 
     // Backpressure: cap number of semantic chunks to avoid unbounded embeds
     if (chunks.length >= MAX_CHUNKS) {
@@ -508,24 +517,26 @@ async function handleWrite(req: any) {
       break;
     }
     // (b) semantic chunk
-    const text = summarizeIfLong(a, getPolicy("salience.max_chunk_tokens", 800));
-    const vec = USE_OS_PIPELINE ? undefined : await embed(text); // if using OS ingest pipeline, let it embed
-    const mem_id = uuidv4();
-    chunks.push({
-      mem_id,
-      scope: (req.params?.scope as Scope) || "this_task",
-      title: deriveTitle(text),
-      text,
-      tags: event.tags,
-      salience: sal,
-      ttl_days: getPolicy("ttl.semantic_days", 180),
-      last_used: null,
-      api_version: event.context.api_version,
-      env: event.context.env,
-      source_event_ids: [event.event_id],
-      embedding: vec,
-      context: event.context
-    });
+    if (WRITE_SEM_ENABLED) {
+      const text = summarizeIfLong(a, getPolicy("salience.max_chunk_tokens", 800));
+      const vec = USE_OS_PIPELINE ? undefined : await embed(text); // if using OS ingest pipeline, let it embed
+      const mem_id = uuidv4();
+      chunks.push({
+        mem_id,
+        scope: (req.params?.scope as Scope) || "this_task",
+        title: deriveTitle(text),
+        text,
+        tags: event.tags,
+        salience: sal,
+        ttl_days: getPolicy("ttl.semantic_days", 180),
+        last_used: null,
+        api_version: event.context.api_version,
+        env: event.context.env,
+        source_event_ids: [event.event_id],
+        embedding: vec,
+        context: event.context
+      });
+    }
   }
 
   // 2a) Index semantic chunks
@@ -705,33 +716,51 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
   const episodicHits = await episodicSearch(q2, fopts);
   log("stage.episodic", { hits: episodicHits.length, tookMs: Date.now() - tE });
 
-  // Stage B: Semantic (k-NN + filters)
-  const tS = Date.now();
-  const semanticHits = await semanticSearch(q2, fopts);
-  log("stage.semantic", { hits: semanticHits.length, tookMs: Date.now() - tS });
+  // Stage B: Semantic (k-NN + filters) — gated by config.stages.semantic.enabled
+  const SEM_ENABLED = retrievalBoolean("stages.semantic.enabled", false);
+  let semanticHits: FusedHit[] = [];
+  if (SEM_ENABLED) {
+    const tS = Date.now();
+    semanticHits = await semanticSearch(q2, fopts);
+    log("stage.semantic", { hits: semanticHits.length, tookMs: Date.now() - tS });
+  } else {
+    log("stage.semantic", { hits: 0, tookMs: 0 });
+  }
 
-  // Stage C: Facts (1–2 hop expansion)
-  const tF = Date.now();
-  const factHits = await factsSearch(q2, fopts);
-  log("stage.facts", { hits: factHits.length, tookMs: Date.now() - tF });
+  // Stage C: Facts (1–2 hop expansion) — gated by config.stages.facts.enabled
+  const FACTS_ENABLED = retrievalBoolean("stages.facts.enabled", false);
+  let factHits: FusedHit[] = [];
+  if (FACTS_ENABLED) {
+    const tF = Date.now();
+    factHits = await factsSearch(q2, fopts);
+    log("stage.facts", { hits: factHits.length, tookMs: Date.now() - tF });
+  } else {
+    log("stage.facts", { hits: 0, tookMs: 0 });
+  }
 
   // Fuse + optional rerank
-  let fused: FusedHit[] = fuseAndDiversify(
-    episodicHits,
-    semanticHits,
-    factHits,
-    {
-      limit: budget,
-      rrfK: getPolicy("fusion.rrf_k", 60),
-      normalizeScores: true,
-      mmr: {
-        enabled: !isTemporalQuery(q2.objective),
-        lambda: getPolicy("diversity.lambda", 0.7),
-        minDistance: getPolicy("diversity.min_distance", 0.2),
-        maxPerTag: getPolicy("diversity.max_per_tag", 3)
+  const DIVERSITY_ENABLED = retrievalBoolean("diversity.enabled", false);
+  let fused: FusedHit[];
+  if (!SEM_ENABLED && !FACTS_ENABLED && !DIVERSITY_ENABLED) {
+    fused = episodicHits.slice(0, budget);
+  } else {
+    fused = fuseAndDiversify(
+      episodicHits,
+      semanticHits,
+      factHits,
+      {
+        limit: budget,
+        rrfK: getPolicy("fusion.rrf_k", 60),
+        normalizeScores: true,
+        mmr: {
+          enabled: DIVERSITY_ENABLED && !isTemporalQuery(q2.objective),
+          lambda: getPolicy("diversity.lambda", 0.7),
+          minDistance: getPolicy("diversity.min_distance", 0.2),
+          maxPerTag: getPolicy("diversity.max_per_tag", 3)
+        }
       }
-    }
-  );
+    );
+  }
   log("fuse", { episodic: episodicHits.length, semantic: semanticHits.length, facts: factHits.length, fused: fused.length });
 
   if (RERANK_ENABLED) {

@@ -10,7 +10,7 @@ stages:
       default_scope: ["this_task", "project"]
       recent_days: 0         # diagnostic: disable recency cutoff temporarily
   semantic:
-    enabled: true
+    enabled: false
     top_k: 150
     ann_candidates: 200
     metric: cosine
@@ -18,7 +18,7 @@ stages:
       default_scope: ["this_task", "project"]
       api_version: ">=3.0"   # default version filter if present
   facts:
-    enabled: true
+    enabled: false
     hops: 2                  # expand neighbors up to 2 hops
     top_k: 40
 
@@ -28,14 +28,14 @@ fusion:
   normalize_scores: true
 
 rerank:
-  enabled: true
+  enabled: false
   max_candidates: 32         # cap for reranker (smoke p95 ~801ms at k=32)
   model: cross-encoder-mini  # placeholder; can be ML Commons model id or external service
   budget_ms: 1200            # max latency budget in ms
   budget_usd: 0.01           # optional cost budget per retrieval
 
 diversity:
-  enabled: true
+  enabled: false
   method: mmr
   lambda: 0.8                # tradeoff relevance vs. diversity
   min_distance: 0.2          # threshold for considering items duplicates
@@ -49,7 +49,7 @@ lexical:
   use_shingles: true         # use *.shingles fields when available
 
 time_decay:
-  enabled: true
+  enabled: false
   episodic:
     field: ts
     half_life_days: 45
