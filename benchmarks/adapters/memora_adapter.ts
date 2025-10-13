@@ -69,7 +69,14 @@ export class MemoryAdapter {
         context_id: ctx.context_id,
         env: ctx.env,
         api_version: ctx.api_version
-      } : {})
+      } : {
+        // Fallback when no active context is set in the server (force episodic writes in bench)
+        tenant_id: process.env.TENANT || "memora",
+        project_id: process.env.PROJECT || "benchmarks",
+        context_id: process.env.CONTEXT_ID,
+        env: process.env.MEMORA_ENV || process.env.NODE_ENV,
+        api_version: process.env.MEMORA_API_VERSION
+      })
     });
     return {
       data: {
@@ -108,7 +115,14 @@ export class MemoryAdapter {
         context_id: ctx.context_id,
         env: ctx.env,
         api_version: ctx.api_version
-      } : {})
+      } : {
+        // Fallback when no active context is set in the server
+        tenant_id: process.env.TENANT || "memora",
+        project_id: process.env.PROJECT || "benchmarks",
+        context_id: process.env.CONTEXT_ID,
+        env: process.env.MEMORA_ENV || process.env.NODE_ENV,
+        api_version: process.env.MEMORA_API_VERSION
+      })
     });
     return {
       data: { written: !!res.written, id: res.event_id },
