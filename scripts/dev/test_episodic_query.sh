@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Test episodic retrieval directly against OpenSearch with temporal-friendly query
 # Usage:
-#   OPENSEARCH_URL=http://localhost:19200 bash scripts/dev/test_episodic_query.sh
+#   OPENSEARCH_URL=http://localhost:9200 bash scripts/dev/test_episodic_query.sh
 set -euo pipefail
 
-OS="${OPENSEARCH_URL:-http://localhost:19200}"
+OS="${OPENSEARCH_URL:-http://localhost:9200}"
 IDX="mem-episodic-*"
 QFILE="$(mktemp /tmp/episodic_query.XXXXXX.json)"
 

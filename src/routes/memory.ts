@@ -885,9 +885,9 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
   const eopts: FilterOptions = {
     tenant_id: fopts.tenant_id,
     project_id: fopts.project_id,
-    // Relax episodic filters: omit context_id/task_id initially to ensure recall; add incrementally if needed
+    // Relax episodic filters: try task_id-only to compare
     // context_id: fopts.context_id,
-    // task_id: fopts.task_id,
+    task_id: fopts.task_id,
     tags: fopts.tags,
     exclude_tags: fopts.exclude_tags,
     recent_days: fopts.recent_days
@@ -1158,6 +1158,8 @@ function deriveTitle(text: string): string {
  * Returns null when not applied.
  */
 function computedMinShouldMatch(q: string, pct: number): string | null {
+  // If pct <= 0, disable MSM entirely (diagnostic mode from retrieval.yaml)
+  if (!(pct > 0)) return null;
   const terms = q
     .toLowerCase()
     .replace(/[^a-z0-9_./:-]+/g, " ")

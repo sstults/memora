@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Small helper to compare today's episodic index counts across OpenSearch ports.
 # Usage:
-#   TENANT=memora PROJECT=benchmarks PORTS="19200 9200" HOST=localhost DATE_UTC=2025-10-12 bash scripts/dev/check_episodic_counts.sh
+#   TENANT=memora PROJECT=benchmarks PORTS="9200" HOST=localhost DATE_UTC=2025-10-12 bash scripts/dev/check_episodic_counts.sh
 # Defaults:
-#   TENANT=memora, PROJECT=benchmarks, PORTS="19200 9200", HOST=localhost, DATE_UTC=$(date -u +%F)
+#   TENANT=memora, PROJECT=benchmarks, PORTS="9200", HOST=localhost, DATE_UTC=$(date -u +%F)
 set -euo pipefail
 
 TENANT="${TENANT:-memora}"
 PROJECT="${PROJECT:-benchmarks}"
-PORTS="${PORTS:-19200 9200}"
+PORTS="${PORTS:-9200}"
 HOST="${HOST:-localhost}"
 DATE_UTC="${DATE_UTC:-$(date -u +%F)}"
 INDEX_PREFIX="${INDEX_PREFIX:-mem-episodic-}"

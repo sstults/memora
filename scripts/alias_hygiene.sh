@@ -9,7 +9,7 @@ set -euo pipefail
 #   * --delete-existing: delete conflicting index and attach alias to target index
 #
 # Defaults:
-#   OS=http://localhost:19200
+#   OS=http://localhost:9200
 #   MEMORA_SEMANTIC_ALIAS=mem-semantic
 #   MEMORA_SEMANTIC_INDEX=mem-semantic-384
 #   TEMPLATE=config/index-templates/mem-semantic.json
@@ -22,7 +22,7 @@ set -euo pipefail
 # WARNING: --delete-existing and --reindex mutate your cluster (dev-only convenience).
 #          Use with care and only in non-production environments.
 
-OS="${OS:-http://localhost:19200}"
+OS="${OS:-http://localhost:9200}"
 ALIAS_NAME="${MEMORA_SEMANTIC_ALIAS:-mem-semantic}"
 TARGET_INDEX="${MEMORA_SEMANTIC_INDEX:-mem-semantic-384}"
 TEMPLATE_PATH="${TEMPLATE:-config/index-templates/mem-semantic.json}"

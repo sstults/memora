@@ -10,13 +10,13 @@
  *  - Sample docs with/without embeddings and inferred embedding length stats
  *
  * Env:
- *  - OPENSEARCH_URL (default: http://localhost:19200)
+ *  - OPENSEARCH_URL (default: http://localhost:9200)
  *  - MEMORA_SEMANTIC_INDEX (default: mem-semantic)
  *  - MEMORA_OS_INGEST_PIPELINE_NAME (default: mem-text-embed)
  */
 import { Client } from "@opensearch-project/opensearch";
 
-const node = process.env.OPENSEARCH_URL || "http://localhost:19200";
+const node = process.env.OPENSEARCH_URL || "http://localhost:9200";
 const index = process.env.MEMORA_SEMANTIC_INDEX || "mem-semantic";
 const ingestPipelineName = process.env.MEMORA_OS_INGEST_PIPELINE_NAME || "mem-text-embed";
 

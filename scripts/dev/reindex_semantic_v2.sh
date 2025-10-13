@@ -16,7 +16,7 @@ set -euo pipefail
 #   ./scripts/dev/reindex_semantic_v2.sh
 #
 # Env:
-#   OPENSEARCH_URL (default: http://localhost:19200)
+#   OPENSEARCH_URL (default: http://localhost:9200)
 #   OPENSEARCH_USERNAME / OPENSEARCH_PASSWORD (optional)
 #   OPENSEARCH_SSL_REJECT_UNAUTHORIZED=false to skip TLS verify (https dev)
 #   MEMORA_SEMANTIC_INDEX (default: mem-semantic)
@@ -25,7 +25,7 @@ set -euo pipefail
 # - This script pauses for confirmations before destructive steps.
 # - Ensure your service is quiesced (no writes) or accept a small window of missed writes.
 
-OS_URL="${OPENSEARCH_URL:-http://localhost:19200}"
+OS_URL="${OPENSEARCH_URL:-http://localhost:9200}"
 SEM_INDEX="${MEMORA_SEMANTIC_INDEX:-mem-semantic}"
 JSON_PATH="config/index-templates/mem-semantic.json"
 TEMP_INDEX="${SEM_INDEX}-v2-$(date +%Y%m%d%H%M%S)"

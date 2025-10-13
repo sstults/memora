@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # OpenSearch diagnostics for Memora indices and episodic lexical probe
-# Usage: OPENSEARCH_URL=http://localhost:19200 scripts/dev/os_diag.sh
+# Usage: OPENSEARCH_URL=http://localhost:9200 scripts/dev/os_diag.sh
 
 set -euo pipefail
 
-OS_URL="${OPENSEARCH_URL:-http://localhost:19200}"
+OS_URL="${OPENSEARCH_URL:-http://localhost:9200}"
 
 section() {
   echo

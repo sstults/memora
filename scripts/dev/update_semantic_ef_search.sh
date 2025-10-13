@@ -12,13 +12,13 @@ set -euo pipefail
 #   EF_SEARCH: 200
 #
 # Env:
-#   OPENSEARCH_URL (default: http://localhost:19200)
+#   OPENSEARCH_URL (default: http://localhost:9200)
 #   OPENSEARCH_USERNAME / OPENSEARCH_PASSWORD (optional basic auth)
 #   OPENSEARCH_SSL_REJECT_UNAUTHORIZED=false to skip TLS verify (if using https with self-signed)
 
 INDEX="${1:-${MEMORA_SEMANTIC_INDEX:-mem-semantic}}"
 EF_SEARCH="${2:-200}"
-OS_URL="${OPENSEARCH_URL:-http://localhost:19200}"
+OS_URL="${OPENSEARCH_URL:-http://localhost:9200}"
 
 echo "Setting knn.algo_param.ef_search=${EF_SEARCH} on index '${INDEX}' at ${OS_URL}"
 

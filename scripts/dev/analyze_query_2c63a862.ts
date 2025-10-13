@@ -10,11 +10,11 @@ import "dotenv/config";
 import { performance } from "node:perf_hooks";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import MemoryAdapter from "../../benchmarks/adapters/memora_adapter.js";
+import MemoryAdapter from "../../benchmarks/adapters/memora_adapter.ts";
 import fs from "node:fs";
 import path from "node:path";
 
-import type { Scope } from "../../benchmarks/adapters/memora_adapter.js";
+import type { Scope } from "../../benchmarks/adapters/memora_adapter.ts";
 
 // Dataset anchor
 const QID = "2c63a862";

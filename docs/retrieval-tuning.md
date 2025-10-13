@@ -60,7 +60,7 @@ Migration and rollout
    - You can tune tie_breaker, min_should_match_pct, half-life, and weights without code changes.
 5) Optional: server-side RRF pipeline (A/B)
    - Register:
-     - OPENSEARCH_URL=http://localhost:19200 ./scripts/dev/register_rrf_pipeline.sh memora_rrf
+     - OPENSEARCH_URL=http://localhost:9200 ./scripts/dev/register_rrf_pipeline.sh memora_rrf
    - Use this pipeline by issuing OpenSearch searches with ?search_pipeline=memora_rrf or attaching index.search.default_pipeline, OR set MEMORA_OS_SEARCH_PIPELINE_BODY_JSON and let src/services/os-ml.ts create/attach a pipeline (requires pipeline body provided via env). The current Memora default continues to rely on in-process RRF/MMR.
 
 A/B and validation checklist
@@ -137,7 +137,7 @@ Quick commands
 - Reindex semantic with new mapping:
   - ./scripts/dev/reindex_semantic_v2.sh
 - Register RRF search pipeline:
-  - OPENSEARCH_URL=http://localhost:19200 ./scripts/dev/register_rrf_pipeline.sh memora_rrf
+  - OPENSEARCH_URL=http://localhost:9200 ./scripts/dev/register_rrf_pipeline.sh memora_rrf
 
 Finalize rollout (one-time)
 1) Increase HNSW search window (no reindex required)
@@ -149,7 +149,7 @@ Finalize rollout (one-time)
 3) Episodic template
    - New daily indices automatically use shingles and bm25_episodic; reindex historical episodic indices only if you need shingles on old data
 4) Optional: register server-side RRF pipeline for A/B
-   - OPENSEARCH_URL=http://localhost:19200 ./scripts/dev/register_rrf_pipeline.sh memora_rrf
+   - OPENSEARCH_URL=http://localhost:9200 ./scripts/dev/register_rrf_pipeline.sh memora_rrf
    - Use via ?search_pipeline=memora_rrf or attach as index.search.default_pipeline (optional)
 5) Restart service to reload retrieval.yaml (config is cached at runtime)
    - Stop/start the service after modifying config/retrieval.yaml so new knobs are applied
@@ -205,7 +205,7 @@ C) Targeted Explain API loop (lexical quality)
     }'
 
 D) Optional server-side fusion A/B (OpenSearch RRF pipeline)
-- Register: OPENSEARCH_URL=http://localhost:19200 ./scripts/dev/register_rrf_pipeline.sh memora_rrf
+- Register: OPENSEARCH_URL=http://localhost:9200 ./scripts/dev/register_rrf_pipeline.sh memora_rrf
 - Compare:
   - In-process fusion (current default) vs search_pipeline=memora_rrf
   - Measure latency and retrieval metrics; select the simpler path that meets goals

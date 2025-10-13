@@ -27,8 +27,8 @@ if (process.env.INTEGRATION === "1") {
   process.env.MEMORA_OS_HEALTH_TIMEOUT_MS = process.env.MEMORA_OS_HEALTH_TIMEOUT_MS || "120000";
   process.env.MEMORA_OS_CLIENT_TIMEOUT_MS = process.env.MEMORA_OS_CLIENT_TIMEOUT_MS || "30000";
   process.env.MEMORA_OS_CLIENT_MAX_RETRIES = process.env.MEMORA_OS_CLIENT_MAX_RETRIES || "5";
-  // Prefer docker-compose remap unless explicitly overridden
-  process.env.OPENSEARCH_URL = process.env.OPENSEARCH_URL || "http://localhost:19200";
+  // Use default local OpenSearch port unless explicitly overridden
+  process.env.OPENSEARCH_URL = process.env.OPENSEARCH_URL || "http://localhost:9200";
 
   // Defer import to avoid pulling client in unit runs
   const gate = async () => {

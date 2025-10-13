@@ -5,15 +5,15 @@ set -euo pipefail
 # Usage:
 #   ./scripts/dev/register_rrf_pipeline.sh [PIPELINE_NAME]
 # Env:
-#   OPENSEARCH_URL (default: http://localhost:19200)
+#   OPENSEARCH_URL (default: http://localhost:9200)
 #   OPENSEARCH_USERNAME / OPENSEARCH_PASSWORD (optional basic auth)
 #   OPENSEARCH_SSL_REJECT_UNAUTHORIZED=false to skip TLS verify (if using https with self-signed)
 #
 # Example:
-#   OPENSEARCH_URL=http://localhost:19200 ./scripts/dev/register_rrf_pipeline.sh memora_rrf
+#   OPENSEARCH_URL=http://localhost:9200 ./scripts/dev/register_rrf_pipeline.sh memora_rrf
 
 PIPELINE_NAME="${1:-memora_rrf}"
-OS_URL="${OPENSEARCH_URL:-http://localhost:19200}"
+OS_URL="${OPENSEARCH_URL:-http://localhost:9200}"
 JSON_PATH="config/opensearch/pipelines/memora_rrf.json"
 
 if [[ ! -f "$JSON_PATH" ]]; then

@@ -45,7 +45,7 @@ if [[ "${1:-}" == "--auto-register" ]] || [[ "${2:-}" == "--auto-register" ]]; t
 fi
 
 # OpenSearch endpoint (defaults to local Docker Compose remap)
-export OPENSEARCH_URL="${OPENSEARCH_URL:-http://localhost:19200}"
+export OPENSEARCH_URL="${OPENSEARCH_URL:-http://localhost:9200}"
 
 # Wait until OpenSearch is ready (cluster health yellow/green) before running tests
 wait_for_os() {

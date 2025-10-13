@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Register and deploy an OpenSearch ML Commons cross-encoder reranker model, print model_id on stdout.
 # Usage:
-#   OPENSEARCH_URL=http://localhost:19200 bash scripts/dev/register_reranker_model.sh
+#   OPENSEARCH_URL=http://localhost:9200 bash scripts/dev/register_reranker_model.sh
 # Optional env:
 #   OPENSEARCH_USERNAME / OPENSEARCH_PASSWORD  (if security enabled)
 #   RERANKER_MODEL_NAME=cross-encoder/ms-marco-MiniLM-L-6-v2
@@ -9,7 +9,7 @@
 #   RERANKER_MODEL_FORMAT=TORCH_SCRIPT  # TORCH_SCRIPT or ONNX depending on OS model support
 set -euo pipefail
 
-OS_URL="${OPENSEARCH_URL:-http://localhost:19200}"
+OS_URL="${OPENSEARCH_URL:-http://localhost:9200}"
 MODEL_NAME="${RERANKER_MODEL_NAME:-cross-encoder/ms-marco-MiniLM-L-6-v2}"
 MODEL_VERSION="${RERANKER_MODEL_VERSION:-1.0.0}"
 MODEL_FORMAT="${RERANKER_MODEL_FORMAT:-TORCH_SCRIPT}"

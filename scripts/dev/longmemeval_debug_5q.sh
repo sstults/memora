@@ -20,7 +20,7 @@ if [[ -f ".env" ]]; then
 fi
 
 # Ensure OpenSearch URL default is set for local dev
-export OPENSEARCH_URL="${OPENSEARCH_URL:-http://localhost:19200}"
+export OPENSEARCH_URL="${OPENSEARCH_URL:-http://localhost:9200}"
 
 QIDS="6ade9755,75499fd8,86f00804,853b0a1d,4100d0a0"
 DATASET_S="benchmarks/LongMemEval/data/longmemeval_s.json"

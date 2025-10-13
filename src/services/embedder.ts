@@ -14,7 +14,7 @@ const DIM = Number(process.env.MEMORA_EMBED_DIM || 384);
 const TIMEOUT_MS = Number(process.env.MEMORA_EMBED_TIMEOUT_MS || 8000);
 const MAX_RETRIES = Number(process.env.MEMORA_EMBED_RETRIES || 3);
 const PROVIDER = (process.env.MEMORA_EMBED_PROVIDER || "").toLowerCase();
-const OS_URL = process.env.OPENSEARCH_URL || "http://localhost:19200";
+const OS_URL = process.env.OPENSEARCH_URL || "http://localhost:9200";
 
 // Resolve OpenSearch ML model id from env or cache file (written by os-ml.ts)
 function getModelIdCachePath(): string {

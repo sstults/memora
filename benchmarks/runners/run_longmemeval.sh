@@ -74,7 +74,7 @@ if [[ "${variant}" == "C" ]]; then
   export MEMORA_RERANK_ENABLED="${MEMORA_RERANK_ENABLED:-true}"
   export MEMORA_SEMANTIC_INDEX="${MEMORA_SEMANTIC_INDEX:-mem-semantic}"
   export MEMORA_EMBED_DIM="${MEMORA_EMBED_DIM:-384}"
-  export OPENSEARCH_URL="${OPENSEARCH_URL:-http://localhost:19200}"
+  export OPENSEARCH_URL="${OPENSEARCH_URL:-http://localhost:9200}"
 fi
 
 echo "=== LongMemEval: Driver ==="

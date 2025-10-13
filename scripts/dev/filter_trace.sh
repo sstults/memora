@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Filter large retrieve.ndjson safely and verify episodic persistence in OpenSearch.
 # Usage:
-#   TRACE_FILE=outputs/memora/trace/retrieve.ndjson TAIL_N=8000 PRINT_N=80 OPENSEARCH_URL=http://localhost:19200 bash scripts/dev/filter_trace.sh
+#   TRACE_FILE=outputs/memora/trace/retrieve.ndjson TAIL_N=8000 PRINT_N=80 OPENSEARCH_URL=http://localhost:9200 bash scripts/dev/filter_trace.sh
 set -euo pipefail
 
 TRACE_FILE="${TRACE_FILE:-outputs/memora/trace/retrieve.ndjson}"
 TAIL_N="${TAIL_N:-5000}"
 PRINT_N="${PRINT_N:-60}"
-OS_URL="${OPENSEARCH_URL:-http://localhost:19200}"
+OS_URL="${OPENSEARCH_URL:-http://localhost:9200}"
 
 if [[ ! -f "$TRACE_FILE" ]]; then
   echo "Trace file not found: $TRACE_FILE" >&2

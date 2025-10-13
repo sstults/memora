@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Target OpenSearch endpoint (defaults to dev cluster)
-OS="${OPENSEARCH_URL:-${OS:-http://localhost:19200}}"
+OS="${OPENSEARCH_URL:-${OS:-http://localhost:9200}}"
 IDX="mem-episodic-$(date -u +%F)"
 
 echo "[create_today_episodic] Target OpenSearch: $OS"

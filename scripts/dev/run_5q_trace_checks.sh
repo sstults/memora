@@ -27,7 +27,7 @@ if [[ -f ".env" ]]; then
 fi
 
 # Defaults
-export OPENSEARCH_URL="${OPENSEARCH_URL:-http://localhost:19200}"
+export OPENSEARCH_URL="${OPENSEARCH_URL:-http://localhost:9200}"
 TRACE_DIR="outputs/memora/trace"
 TRACE_FILE="${TRACE_DIR}/retrieve.ndjson"
 mkdir -p "${TRACE_DIR}"
@@ -41,9 +41,9 @@ export TODAY_INDEX="mem-episodic-${TODAY_UTC}"
 QIDS="6ade9755,75499fd8,86f00804,853b0a1d,4100d0a0"
 DATASET_S="benchmarks/LongMemEval/data/longmemeval_s.json"
 
-# Helper: JSON count for (tenant, project) on port 19200
-count_tp_19200() {
-  local base="http://localhost:19200"
+# Helper: JSON count for (tenant, project) on port 9200
+count_tp_local() {
+  local base="http://localhost:9200"
   local idx="${TODAY_INDEX}"
   local data
   data=$(cat <<JSON
@@ -102,8 +102,8 @@ show_retrieve_end_stats() {
 }
 
 # Step 0: Baseline count
-echo "-- Checking initial episodic count (tenant=${TENANT}, project=${PROJECT}) on 19200 --"
-COUNT_BEFORE="$(count_tp_19200)"
+echo "-- Checking initial episodic count (tenant=${TENANT}, project=${PROJECT}) on 9200 --"
+COUNT_BEFORE="$(count_tp_local)"
 echo "COUNT_BEFORE=${COUNT_BEFORE}"
 
 # Step 1: Run the 5-question debug with explicit trace
@@ -130,7 +130,7 @@ echo
 show_retrieve_end_stats
 echo
 echo "-- Checking episodic counts after run --"
-COUNT_AFTER="$(count_tp_19200)"
+COUNT_AFTER="$(count_tp_local)"
 echo "COUNT_AFTER=${COUNT_AFTER}"
 
 # Decide if counts increased

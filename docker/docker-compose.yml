@@ -1,7 +1,8 @@
+name: memora-opensearch
 services:
   opensearch-node1:
     image: opensearchproject/opensearch:3.2.0
-    container_name: opensearch-node1
+    container_name: memora-opensearch
     environment:
       - cluster.name=memora-cluster
       - node.name=opensearch-node1
@@ -17,8 +18,8 @@ services:
     volumes:
       - os-data-32:/usr/share/opensearch/data
     ports:
-      - "19200:9200"   # OpenSearch API (host mapped to 19200 to avoid conflicts)
-      - "19600:9600"   # Performance analyzer (host mapped to 19600 to avoid conflicts)
+      - "9200:9200"   # OpenSearch API
+      - "9600:9600"   # Performance analyzer
 
   dashboards:
     image: opensearchproject/opensearch-dashboards:3.2.0
@@ -26,7 +27,7 @@ services:
     environment:
       - OPENSEARCH_HOSTS=http://opensearch-node1:9200
     ports:
-      - "15601:5601"   # Dashboards UI (host mapped to 15601)
+      - "5601:5601"   # Dashboards UI
     depends_on:
       - opensearch-node1
 
