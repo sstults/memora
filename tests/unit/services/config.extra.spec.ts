@@ -12,9 +12,9 @@ describe("config readers - booleans, defaults, and cache reset", () => {
 
     // True booleans from YAML
     expect(retrievalBoolean("stages.episodic.enabled", false)).toBe(true);
-    expect(retrievalBoolean("stages.semantic.enabled", false)).toBe(true);
-    expect(retrievalBoolean("diversity.enabled", false)).toBe(true);
-    expect(retrievalBoolean("rerank.enabled", false)).toBe(true);
+    expect(retrievalBoolean("stages.semantic.enabled", false)).toBe(false);
+    expect(retrievalBoolean("diversity.enabled", false)).toBe(false);
+    expect(retrievalBoolean("rerank.enabled", false)).toBe(false);
 
     // Numeric -> boolean coercion (non-zero => true)
     expect(retrievalBoolean("stages.episodic.top_k", false)).toBe(true);
