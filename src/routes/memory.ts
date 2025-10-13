@@ -916,7 +916,7 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
     project_id: fopts.project_id,
     // Relax episodic filters: try task_id-only to compare
     // context_id: fopts.context_id,
-    task_id: fopts.task_id,
+    // task_id excluded for minimal episodic recall
     tags: fopts.tags,
     exclude_tags: fopts.exclude_tags,
     recent_days: fopts.recent_days
