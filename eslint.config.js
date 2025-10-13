@@ -5,7 +5,16 @@ import prettier from 'eslint-config-prettier';
 export default tseslint.config(
   // Ignore build artifacts and external assets
   {
-    ignores: ['dist/', 'node_modules/', 'config/index-templates/**']
+    ignores: [
+      'dist/',
+      'node_modules/',
+      'config/index-templates/**',
+      // Limit lint to TS sources/tests; ignore benchmarks, venvs, and dev mjs scripts
+      'benchmarks/**',
+      'outputs/**',
+      '**/.venv*/**',
+      'scripts/dev/**/*.mjs'
+    ]
   },
 
   // Base JS recommended rules
