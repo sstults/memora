@@ -7,7 +7,6 @@ import { debug } from "../services/log.js";
 import { getClient, bulkSafe, indexWithRetries, searchWithRetries, withRetries } from "../services/os-client.js";
 import { embed } from "../services/embedder.js";
 import { scoreSalience, atomicSplit, summarizeIfLong, redact } from "../services/salience.js";
-import { crossRerank } from "../services/rerank.js";
 import { policyNumber, policyArray, retrievalNumber, retrievalArray, retrievalBoolean, retrievalString } from "../services/config.js";
 import { packPrompt } from "../services/packer.js";
 import fs from "node:fs";
@@ -16,7 +15,7 @@ import { z } from "zod";
 
 import { requireContext } from "./context.js";
 import { buildBoolFilter, FilterOptions } from "../domain/filters.js";
-import { fuseAndDiversify, Hit as FusedHit } from "../domain/fusion.js";
+import type { Hit as FusedHit } from "../domain/fusion.js";
 import {
   Context,
   Event,
@@ -34,8 +33,6 @@ const EPISODIC_PREFIX = process.env.MEMORA_EPI_PREFIX || "mem-episodic-";
 
 const DEFAULT_BUDGET = Number(process.env.MEMORA_DEFAULT_BUDGET || 12);
 // Rerank gating: env override if set, else fall back to retrieval.yaml (rerank.enabled)
-const ENV_RERANK = process.env.MEMORA_RERANK_ENABLED;
-const RERANK_ENABLED = ENV_RERANK ? ENV_RERANK.toLowerCase() === "true" : retrievalBoolean("rerank.enabled", false);
 const USE_OS_PIPELINE = (process.env.MEMORA_EMBED_PROVIDER || "").toLowerCase() === "opensearch_pipeline";
 const log = debug("memora:memory");
 function currentTraceFile(): string {
@@ -717,68 +714,20 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
   log("stage.episodic", { hits: episodicHits.length, tookMs: Date.now() - tE });
 
   // Stage B: Semantic (k-NN + filters) — gated by config.stages.semantic.enabled
-  const SEM_ENABLED = retrievalBoolean("stages.semantic.enabled", false);
-  let semanticHits: FusedHit[] = [];
-  if (SEM_ENABLED) {
-    const tS = Date.now();
-    semanticHits = await semanticSearch(q2, fopts);
-    log("stage.semantic", { hits: semanticHits.length, tookMs: Date.now() - tS });
-  } else {
-    log("stage.semantic", { hits: 0, tookMs: 0 });
-  }
+  const semanticHits: FusedHit[] = [];
+  log("stage.semantic", { hits: 0, tookMs: 0 });
 
   // Stage C: Facts (1–2 hop expansion) — gated by config.stages.facts.enabled
-  const FACTS_ENABLED = retrievalBoolean("stages.facts.enabled", false);
-  let factHits: FusedHit[] = [];
-  if (FACTS_ENABLED) {
-    const tF = Date.now();
-    factHits = await factsSearch(q2, fopts);
-    log("stage.facts", { hits: factHits.length, tookMs: Date.now() - tF });
-  } else {
-    log("stage.facts", { hits: 0, tookMs: 0 });
-  }
+  const factHits: FusedHit[] = [];
+  log("stage.facts", { hits: 0, tookMs: 0 });
 
   // Fuse + optional rerank
-  const DIVERSITY_ENABLED = retrievalBoolean("diversity.enabled", false);
-  let fused: FusedHit[];
-  if (!SEM_ENABLED && !FACTS_ENABLED && !DIVERSITY_ENABLED) {
-    fused = episodicHits.slice(0, budget);
-  } else {
-    fused = fuseAndDiversify(
-      episodicHits,
-      semanticHits,
-      factHits,
-      {
-        limit: budget,
-        rrfK: getPolicy("fusion.rrf_k", 60),
-        normalizeScores: true,
-        mmr: {
-          enabled: DIVERSITY_ENABLED && !isTemporalQuery(q2.objective),
-          lambda: getPolicy("diversity.lambda", 0.7),
-          minDistance: getPolicy("diversity.min_distance", 0.2),
-          maxPerTag: getPolicy("diversity.max_per_tag", 3)
-        }
-      }
-    );
-  }
+  let fused: FusedHit[] = episodicHits.slice(0, budget);
   log("fuse", { episodic: episodicHits.length, semantic: semanticHits.length, facts: factHits.length, fused: fused.length });
 
-  if (RERANK_ENABLED) {
-    const r0 = Date.now();
-    const inCount = fused.length;
-    log("rerank.start", { candidates: inCount });
-    fused = await crossRerank(q2.objective, fused, {
-      maxCandidates: getPolicy("rerank.max_candidates", 64),
-      budgetMs: getPolicy("rerank.budget_ms", 1000)
-    });
-    fused = fused.slice(0, budget);
-    log("rerank.end", { tookMs: Date.now() - r0, in: inCount, out: fused.length });
-  }
 
   // Touch last_used for semantic docs we return
-  const semanticIds = fused.filter(h => h.source === "semantic").map(h => h.id);
-  await touchLastUsed(semanticIds);
-  log("semantic.touch", { count: semanticIds.length });
+  // semantic.touch skipped in minimal POC
 
   // Optionally compress/package on the server; often you’ll pack in the client
   const snippets = fused.map(h => ({
@@ -916,7 +865,7 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
     project_id: fopts.project_id,
     // Relax episodic filters: try task_id-only to compare
     // context_id: fopts.context_id,
-    task_id: fopts.task_id,
+    // task_id excluded for minimal episodic recall
     tags: fopts.tags,
     exclude_tags: fopts.exclude_tags,
     recent_days: fopts.recent_days
@@ -1024,158 +973,15 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
 }
 
 // ---- Semantic k-NN
-async function semanticSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<FusedHit[]> {
-  const qvec = await embed(buildSemanticQueryText(q));
-  const size = getPolicy("stages.semantic.top_k", 50);
-
-  const sfopts: FilterOptions = {
-    tenant_id: fopts.tenant_id,
-    project_id: fopts.project_id,
-    context_id: fopts.context_id,
-    // semantic docs do not persist task_id; filter by scope/context instead
-    scopes: fopts.scopes,
-    tags: fopts.tags,
-    api_version: fopts.api_version,
-    env: fopts.env,
-    exclude_tags: fopts.exclude_tags
-  };
-  const bf = buildBoolFilter(sfopts);
-  const filterClauses: any[] = [];
-  for (const qx of bf.bool.must) filterClauses.push(qx);
-  for (const qx of bf.bool.filter) filterClauses.push(qx);
-  if (bf.bool.must_not && bf.bool.must_not.length) {
-    filterClauses.push({ bool: { must_not: bf.bool.must_not } });
-  }
-
-  // Use widely-supported script_score with knn_score to avoid version-specific knn syntax issues
-  const innerBool: any = {
-    filter: bf.bool.filter || []
-  };
-  if (bf.bool.must && bf.bool.must.length) innerBool.must = bf.bool.must;
-  if (bf.bool.must_not && bf.bool.must_not.length) innerBool.must_not = bf.bool.must_not;
-
-  const body = {
-    size,
-    query: {
-      script_score: {
-        query: { bool: innerBool },
-        script: {
-          source: "knn_score",
-          lang: "knn",
-          params: {
-            field: "embedding",
-            query_value: qvec,
-            space_type: "cosinesimil"
-          }
-        }
-      }
-    }
-  };
-  const resp = await searchWithRetries({ index: SEMANTIC_INDEX, body });
-  let hits: any[] = (resp.body.hits?.hits || []);
-
-  // Fallback: if ANN returns nothing (plugin/syntax variance), use BM25 over text/title with same filters
-  if (hits.length === 0) {
-    const fallbackBody = {
-      size,
-      query: {
-        bool: {
-          must: [{
-            simple_query_string: {
-              query: q.objective,
-              fields: ["text^2", "title", "tags"]
-            }
-          }],
-          filter: bf.bool.filter,
-          must_not: bf.bool.must_not
-        }
-      }
-    };
-    const resp2 = await searchWithRetries({ index: SEMANTIC_INDEX, body: fallbackBody as any });
-    hits = (resp2.body.hits?.hits || []);
-  }
-
-  const tdEnabled = retrievalBoolean("time_decay.enabled", false);
-  const halfLife = retrievalNumber("time_decay.semantic.half_life_days", 45);
-  const weight = retrievalNumber("time_decay.semantic.weight", 0.15);
-
-  return hits.map((hit: any, i: number) => {
-    const baseScore = hit._score ?? 0;
-    const lu: string | undefined = hit._source?.last_used;
-    const decay = tdEnabled ? recencyFactor(lu, halfLife) : 0;
-    const adj = baseScore * (1 + weight * decay);
-    return {
-      id: `mem:${hit._id}`,
-      text: hit._source?.text || "",
-      score: tdEnabled ? adj : baseScore,
-      rank: i + 1,
-      source: "semantic" as const,
-      tags: hit._source?.tags || [],
-      why: "semantic: vector similarity",
-      meta: { embedding: hit._source?.embedding, last_used: lu }
-    };
-  });
-}
 
 // ---- Facts (1–2 hop expansion; here we just keyword-match s/p/o)
-async function factsSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<FusedHit[]> {
-  // Facts docs only store tenant_id and project_id; avoid filtering on context/task/env/api_version
-  const ff = buildBoolFilter({
-    tenant_id: fopts.tenant_id,
-    project_id: fopts.project_id
-  } as any);
-  const filterClauses: any[] = [];
-  for (const qx of ff.bool.must) filterClauses.push(qx);
-  for (const qx of ff.bool.filter) filterClauses.push(qx);
 
-  const body = {
-    size: getPolicy("stages.facts.top_k", 20),
-    query: {
-      bool: {
-        must: [{
-          multi_match: {
-            query: q.objective,
-            fields: ["s^2", "p", "o"]
-          }
-        }],
-        filter: filterClauses
-      }
-    }
-  };
-  const resp = await searchWithRetries({ index: FACTS_INDEX, body });
-  return (resp.body.hits?.hits || []).map((hit: any, i: number) => ({
-    id: `fact:${hit._id}`,
-    text: `${hit._source?.s} ${hit._source?.p} ${hit._source?.o}`,
-    score: hit._score ?? 0,
-    rank: i + 1,
-    source: "facts" as const,
-    tags: ["fact"],
-    why: "facts: structured relation",
-    meta: {}
-  }));
-}
-
-async function touchLastUsed(memIds: string[]) {
-  if (memIds.length === 0) return;
-  const now = new Date().toISOString();
-  const body = memIds.flatMap((fullId) => {
-    const id = fullId.replace(/^mem:/, "");
-    return [{ update: { _index: SEMANTIC_INDEX, _id: id } }, { doc: { last_used: now } }];
-  });
-  await bulkSafe(body, false);
-}
 
  // ---- Utilities ----
  function makeIdemKey(ctxIds: { tenant_id: string; project_id: string; context_id: string; task_id: string }, key: string): string {
    const safe = (s: string) => String(s).replace(/[^A-Za-z0-9:_-]/g, "_");
    return `${safe(ctxIds.tenant_id)}:${safe(ctxIds.project_id)}:${safe(ctxIds.context_id)}:${safe(ctxIds.task_id)}:${safe(key)}`;
  }
- function buildSemanticQueryText(q: RetrievalQuery): string {
-  // IMPORTANT: For semantic query embedding, use only the natural-language objective.
-  // All metadata constraints (scope/tags/env/api_version) are applied via filters, not the embedding.
-  // Including tags/identifiers in the embed text pollutes the semantic signal and hurts retrieval accuracy.
-  return String(q.objective ?? "");
-}
 
 function deriveTitle(text: string): string {
   const first = text.split("\n")[0].trim();
@@ -1212,19 +1018,6 @@ function isTemporalQuery(q: string | undefined): boolean {
  * Recency factor in [0,1], where 1 means "now", 0.5 at half-life in days.
  * Missing/invalid timestamps return 0 (no boost).
  */
-function recencyFactor(isoTs: string | null | undefined, halfLifeDays: number): number {
-  if (!isoTs) return 0;
-  const t = new Date(isoTs).getTime();
-  if (!Number.isFinite(t)) return 0;
-  const now = Date.now();
-  const ageMs = Math.max(0, now - t);
-  const ageDays = ageMs / (1000 * 60 * 60 * 24);
-  const hl = Math.max(1e-6, halfLifeDays);
-  // Exponential decay with half-life
-  const factor = Math.pow(0.5, ageDays / hl);
-  // Bound to [0,1]
-  return Math.max(0, Math.min(1, factor));
-}
 
 /**
  * memory.write_if_salient
