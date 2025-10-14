@@ -855,7 +855,10 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
   const useShingles = retrievalBoolean("lexical.use_shingles", true);
   const fields = [
     "content^3",
-    ...(useShingles ? ["content.shingles^1.2"] : [])
+    ...(useShingles ? ["content.shingles^1.2"] : []),
+    "tags^2",
+    "artifacts^1",
+    "content.raw^0.5"
   ];
   const mmType = retrievalString("lexical.multi_match_type", "best_fields");
   const tieBreaker = retrievalNumber("lexical.tie_breaker", 0.3);
