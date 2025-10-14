@@ -54,6 +54,18 @@ function traceWrite(event: string, payload: any) {
   }
 }
 
+// Trace episodic search body once per process for reproduction
+let EPI_BODY_LOGGED_ONCE = false;
+function traceEpisodicBodyOnce(index: string, body: any) {
+  if (EPI_BODY_LOGGED_ONCE) return;
+  EPI_BODY_LOGGED_ONCE = true;
+  try {
+    traceWrite("episodic.body_once", { index, body });
+  } catch {
+    // ignore
+  }
+}
+
 // Environment snapshot from memory route module to verify TRACE_FILE visibility
 try {
   traceWrite("env.snapshot.memory", {
@@ -680,7 +692,16 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
   } catch { /* ignore */ void 0; }
 
   const active: Context = requireContext();
-  try { traceWrite("retrieve.post_context", {}); } catch { /* ignore */ void 0; }
+  try {
+    traceWrite("retrieve.post_context", {
+      tenant_id: active.tenant_id,
+      project_id: active.project_id,
+      context_id: active.context_id,
+      task_id: active.task_id,
+      env: active.env,
+      api_version: active.api_version
+    });
+  } catch { /* ignore */ void 0; }
 
   const q = req.params as RetrievalQuery;
   const q2 = q as RetrievalQuery;
@@ -966,6 +987,7 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
       // best-effort logging
     }
   }
+  try { traceEpisodicBodyOnce(`${EPISODIC_PREFIX}*`, body); } catch { /* ignore */ void 0; }
   let resp = await searchWithRetries({ index: `${EPISODIC_PREFIX}*`, body });
   let hits: any[] = resp?.body?.hits?.hits || [];
   {
