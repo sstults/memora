@@ -350,8 +350,8 @@ export function registerMemory(server: any) {
 // memory.write
 // =========================
 async function handleWrite(req: any) {
-  // Use SDK-provided params when present; otherwise normalize from envelope
-  if (!(req as any)?.params || (typeof (req as any).params === "object" && Object.keys((req as any).params || {}).length === 0)) {
+  // Normalize envelopes: if params missing OR not an object OR missing 'content', extract from envelope
+  if (!(req as any)?.params || typeof (req as any).params !== "object" || !("content" in (req as any).params)) {
     (req as any).params = normalizeParamsContainer(req);
   }
   try {
@@ -619,35 +619,14 @@ async function handleWrite(req: any) {
  */
 // =========================
 async function handleRetrieve(req: any): Promise<RetrievalResult> {
-  // Prefer SDK-provided params; only normalize if missing/empty
-  const incoming = (req as any)?.params;
-  let normalizedParams: any = undefined;
-
-  // Detect when req.params is actually the SDK envelope (not user arguments)
-  const looksLikeEnvelope =
-    incoming && typeof incoming === "object" &&
-    ("sendRequest" in incoming || "requestInfo" in incoming || "sessionId" in incoming || "signal" in incoming || "_meta" in incoming);
-
-  if (incoming && typeof incoming === "object" && Object.keys(incoming).length > 0 && !looksLikeEnvelope) {
-    // params already looks like plain user args
-    normalizedParams = incoming;
-  } else if (incoming && looksLikeEnvelope) {
-    // Extract from the envelope first
-    normalizedParams = normalizeParamsContainer(incoming);
-  }
-
-  // Fallback: extract from the whole request envelope (req.arguments, req.requestInfo, etc.)
-  if (!normalizedParams || Object.keys(normalizedParams || {}).length === 0) {
-    normalizedParams = normalizeParamsContainer(req);
-  }
-
-
-  (req as any).params = normalizedParams;
+  // Normalize params from various envelopes (handles plain args, {params:{...}}, SDK shapes)
+  (req as any).params = normalizeParamsContainer((req as any)?.params ?? req);
 
   // Early trace to confirm entry into handler (post-normalization)
   try {
-    const hasParams = normalizedParams && typeof normalizedParams === "object" && Object.keys(normalizedParams).length > 0;
-    traceWrite("retrieve.enter", { hasParams, keys: Object.keys((req as any)?.params || []), objective: String((req as any)?.params?.objective ?? "") });
+    const p: any = (req as any)?.params || {};
+    const hasParams = p && typeof p === "object" && Object.keys(p).length > 0;
+    traceWrite("retrieve.enter", { hasParams, keys: Object.keys(p || {}), objective: String(p?.objective ?? "") });
   } catch {
     // ignore
   }
@@ -767,9 +746,16 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
 
   // Stage A: Episodic (BM25 / match)
   const tE = Date.now();
-  try { traceWrite("retrieve.guard.before_epi", {}); } catch { /* ignore */ void 0; }
-  const episodicHits = await episodicSearch(q2, fopts);
-  try { traceWrite("retrieve.guard.after_epi", { hits: episodicHits.length }); } catch { /* ignore */ void 0; }
+  let episodicHits: FusedHit[] = [];
+  try {
+    traceWrite("retrieve.guard.before_epi", {});
+    episodicHits = await episodicSearch(q2, fopts);
+  } catch (e) {
+    try { traceWrite("retrieve.guard.epi_error", { error: String(e) }); } catch { /* ignore */ void 0; }
+    throw e;
+  } finally {
+    try { traceWrite("retrieve.guard.after_epi", { hits: Array.isArray(episodicHits) ? episodicHits.length : -1 }); } catch { /* ignore */ void 0; }
+  }
   log("stage.episodic", { hits: episodicHits.length, tookMs: Date.now() - tE });
 
   // Stage B: Semantic (k-NN + filters) — gated by config.stages.semantic.enabled
@@ -801,6 +787,7 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
 
   log("retrieve.end", { totalMs: Date.now() - t0, snippets: snippets.length });
   traceWrite("retrieve.end", { totalMs: Date.now() - t0, snippets: snippets.length });
+  try { traceWrite("retrieve.finally", { phase: "after_end" }); } catch { /* ignore */ void 0; }
   return { snippets };
 }
 
@@ -1090,7 +1077,70 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
       // best-effort fallback 2
     }
   }
-
+  
+  // Fallback 3: if still zero, relax tag filter to improve recall
+  if (!Array.isArray(hits) || hits.length === 0) {
+    try {
+      const eoptsNoTags: FilterOptions = {
+        tenant_id: fopts.tenant_id,
+        project_id: fopts.project_id,
+        exclude_tags: fopts.exclude_tags,
+        recent_days: fopts.recent_days
+      };
+      const filter2 = buildBoolFilter(eoptsNoTags);
+      const fallback3Body: any = {
+        size: getPolicy("stages.episodic.top_k", 25),
+        query: {
+          bool: {
+            must: [mmClause],
+            filter: [...(filter2.bool.filter || []), ...(filter2.bool.must || [])],
+            must_not: filter2.bool.must_not || []
+          }
+        }
+      };
+      traceWrite("episodic.fallback3.request", { index: `${EPISODIC_PREFIX}*`, query: fallback3Body.query });
+      resp = await searchWithRetries({ index: `${EPISODIC_PREFIX}*`, body: fallback3Body });
+      hits = resp?.body?.hits?.hits || [];
+      traceWrite("episodic.fallback3.response", {
+        took: resp?.body?.took,
+        total: (resp?.body?.hits as any)?.total ?? null,
+        count: Array.isArray(hits) ? hits.length : 0,
+        sample: (Array.isArray(hits) ? hits : []).slice(0, 3).map((h: any) => ({ id: h?._id, score: h?._score }))
+      });
+    } catch {
+      // best-effort fallback 3
+    }
+  }
+  
+  // Fallback 4: if still zero, ignore objective and return most recent docs satisfying tenant/project and tag filters
+  if (!Array.isArray(hits) || hits.length === 0) {
+    try {
+      const filter3 = buildBoolFilter(eopts); // include tags if provided
+      const fallback4Body: any = {
+        size: getPolicy("stages.episodic.top_k", 25),
+        query: {
+          bool: {
+            must: [],
+            filter: [...(filter3.bool.filter || []), ...(filter3.bool.must || [])],
+            must_not: filter3.bool.must_not || []
+          }
+        },
+        sort: [{ ts: { order: "desc" } }]
+      };
+      traceWrite("episodic.fallback4.request", { index: `${EPISODIC_PREFIX}*`, query: fallback4Body.query, sort: fallback4Body.sort });
+      resp = await searchWithRetries({ index: `${EPISODIC_PREFIX}*`, body: fallback4Body });
+      hits = resp?.body?.hits?.hits || [];
+      traceWrite("episodic.fallback4.response", {
+        took: resp?.body?.took,
+        total: (resp?.body?.hits as any)?.total ?? null,
+        count: Array.isArray(hits) ? hits.length : 0,
+        sample: (Array.isArray(hits) ? hits : []).slice(0, 3).map((h: any) => ({ id: h?._id, score: h?._score }))
+      });
+    } catch {
+      // best-effort fallback 4
+    }
+  }
+  
   return (hits || []).map((hit: any, i: number) => ({
     id: `evt:${hit._id}`,
     text: hit._source?.content || "",

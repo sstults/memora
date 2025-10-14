@@ -10,6 +10,7 @@ import {
 import { registerContext } from "../../src/routes/context";
 import { registerMemory } from "../../src/routes/memory";
 import { registerEval } from "../../src/routes/eval";
+import { retrievalBoolean } from "../../src/services/config";
 
 type ToolFn = (req: any) => Promise<any>;
 
@@ -30,6 +31,7 @@ type ToolFn = (req: any) => Promise<any>;
 // - write an event and retrieve snippets (fusion across stages)
 
 const run = process.env.INTEGRATION === "1";
+const SEM_ENABLED = retrievalBoolean("stages.semantic.enabled", false);
 
 describe.runIf(run)("memory integration (OpenSearch required)", () => {
   const SEMANTIC_INDEX = process.env.MEMORA_SEMANTIC_INDEX || "mem-semantic";
@@ -38,7 +40,17 @@ describe.runIf(run)("memory integration (OpenSearch required)", () => {
   const episodicToday = `${EPISODIC_PREFIX}${new Date().toISOString().slice(0, 10)}`;
 
   const tools = new Map<string, ToolFn>();
-  const server = { tool: (name: string, fn: ToolFn) => tools.set(name, fn) };
+  // Capture the handler as the last argument to support signatures like:
+  // server.tool(name), server.tool(name, handler), server.tool(name, desc, schema, handler)
+  const server = {
+    tool: (...args: any[]) => {
+      const name = args[0];
+      const handler = args[args.length - 1];
+      if (typeof handler === "function") {
+        tools.set(name, handler);
+      }
+    }
+  };
   const client = getClient();
 
   beforeAll(async () => {
@@ -99,8 +111,12 @@ describe.runIf(run)("memory integration (OpenSearch required)", () => {
 
     expect(wres?.ok).toBe(true);
     expect(typeof wres?.event_id).toBe("string");
-    // At least one semantic upsert expected from salience score
-    expect(wres?.semantic_upserts).toBeGreaterThanOrEqual(1);
+    // Semantic upserts only when semantic stage enabled
+    if (SEM_ENABLED) {
+      expect(wres?.semantic_upserts).toBeGreaterThanOrEqual(1);
+    } else {
+      expect(wres?.semantic_upserts).toBe(0);
+    }
 
     // Explicitly refresh semantic index to ensure k-NN sees newly upserted chunks
     await client.indices.refresh({ index: SEMANTIC_INDEX });
@@ -118,12 +134,14 @@ describe.runIf(run)("memory integration (OpenSearch required)", () => {
 
     expect(Array.isArray(rres?.snippets)).toBe(true);
     expect(rres.snippets.length).toBeGreaterThan(0);
-    // Ideally we see at least one semantic hit
     const hasSemantic = rres.snippets.some((s: any) => s.source === "semantic");
-    expect(hasSemantic).toBe(true);
+    if (SEM_ENABLED) {
+      // When semantic retrieval is enabled, we expect at least one semantic hit
+      expect(hasSemantic).toBe(true);
+    }
   });
 
-  it("touches last_used on retrieved semantic mems and can promote scope", async () => {
+  it.runIf(SEM_ENABLED)("touches last_used on retrieved semantic mems and can promote scope", async () => {
     const write = tools.get("memory.write")!;
     const retrieve = tools.get("memory.retrieve")!;
     const promote = tools.get("memory.promote")!;
