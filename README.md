@@ -40,6 +40,28 @@ npm run dev
 - Write an event: memory.write
 - Retrieve episodic memories (BM25 only): memory.retrieve
 
+Diagnostics and smoke script
+- For a quick end-to-end validation with trace tails, run:
+  ```bash
+  bash scripts/dev/run_smokes_and_tail.sh
+  ```
+  This will:
+  - Start OpenSearch via docker-compose
+  - Build the TypeScript dist
+  - Run smoke:write with MEMORA_BOOTSTRAP_OS=1 MEMORA_BOOTSTRAP_CREATE_TODAY=true
+  - Tail episodic.index.* traces from outputs/memora/trace/retrieve.ndjson
+  - Run smoke:retrieve and print top snippets
+  - Tail retrieve.* guard markers and episodic.* search markers
+
+- You can also tail interactively:
+  ```bash
+  npm run dev:trace:episodic:follow
+  ```
+  Or filter the trace file:
+  ```bash
+  npm run dev:trace:filter
+  ```
+
 Notes:
 - Do not set embedding or rerank env vars on this branch; those features are off by default.
 - Integration/bench/ML-related scripts live on feature branches or the archival branch.
