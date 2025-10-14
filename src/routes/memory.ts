@@ -912,16 +912,18 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
           // For temporal queries, allow either the question tokens OR date/number patterns to match
           should: [mmClause, ...shouldClauses],
           minimum_should_match: 1,
-          must: filter.bool.must || [],
-          filter: filter.bool.filter,
+          must: [],
+          // Move tenant/project constraints to filter to avoid unintended must interactions
+          filter: [...(filter.bool.filter || []), ...(filter.bool.must || [])],
           must_not: filter.bool.must_not
         }
       }
     : {
         bool: {
-          must: [mmClause, ...(filter.bool.must || [])],
+          // Keep lexical clause in must; move constraints to filter for stability and recall
+          must: [mmClause],
           ...(shouldClauses.length ? { should: shouldClauses } : {}),
-          filter: filter.bool.filter,
+          filter: [...(filter.bool.filter || []), ...(filter.bool.must || [])],
           must_not: filter.bool.must_not
         }
       };
@@ -964,10 +966,10 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
       // best-effort logging
     }
   }
-  const resp = await searchWithRetries({ index: `${EPISODIC_PREFIX}*`, body });
+  let resp = await searchWithRetries({ index: `${EPISODIC_PREFIX}*`, body });
+  let hits: any[] = resp?.body?.hits?.hits || [];
   {
     try {
-      const hits: any[] = resp?.body?.hits?.hits || [];
       traceWrite("episodic.response", {
         took: resp?.body?.took,
         total: (resp?.body?.hits as any)?.total ?? null,
@@ -978,7 +980,73 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
       // best-effort logging
     }
   }
-  return (resp.body.hits?.hits || []).map((hit: any, i: number) => ({
+
+  // Fallback: if zero episodic hits, retry with a simpler match query and relaxed filter placement
+  if (!Array.isArray(hits) || hits.length === 0) {
+    try {
+      const fallbackBody: any = {
+        size: getPolicy("stages.episodic.top_k", 25),
+        query: {
+          bool: {
+            must: [
+              { match: { content: { query: String(q.objective ?? ""), operator: "or" } } }
+            ],
+            // Move tenant/project terms to filter to avoid accidental scoring interference
+            filter: [...(filter.bool.filter || []), ...(filter.bool.must || [])],
+            must_not: filter.bool.must_not || []
+          }
+        }
+      };
+      traceWrite("episodic.fallback.request", { index: `${EPISODIC_PREFIX}*`, query: fallbackBody.query });
+      resp = await searchWithRetries({ index: `${EPISODIC_PREFIX}*`, body: fallbackBody });
+      hits = resp?.body?.hits?.hits || [];
+      traceWrite("episodic.fallback.response", {
+        took: resp?.body?.took,
+        total: (resp?.body?.hits as any)?.total ?? null,
+        count: Array.isArray(hits) ? hits.length : 0,
+        sample: (Array.isArray(hits) ? hits : []).slice(0, 3).map((h: any) => ({ id: h?._id, score: h?._score }))
+      });
+    } catch {
+      // best-effort fallback
+    }
+  }
+
+  // Fallback 2: broaden to simple_query_string over content/raw/tags with OR operator
+  if (!Array.isArray(hits) || hits.length === 0) {
+    try {
+      const fallback2Body: any = {
+        size: getPolicy("stages.episodic.top_k", 25),
+        query: {
+          bool: {
+            must: [
+              {
+                simple_query_string: {
+                  query: String(q.objective ?? ""),
+                  fields: ["content^3", "content.raw^0.5", "tags^2"],
+                  default_operator: "or"
+                }
+              }
+            ],
+            filter: [...(filter.bool.filter || []), ...(filter.bool.must || [])],
+            must_not: filter.bool.must_not || []
+          }
+        }
+      };
+      traceWrite("episodic.fallback2.request", { index: `${EPISODIC_PREFIX}*`, query: fallback2Body.query });
+      resp = await searchWithRetries({ index: `${EPISODIC_PREFIX}*`, body: fallback2Body });
+      hits = resp?.body?.hits?.hits || [];
+      traceWrite("episodic.fallback2.response", {
+        took: resp?.body?.took,
+        total: (resp?.body?.hits as any)?.total ?? null,
+        count: Array.isArray(hits) ? hits.length : 0,
+        sample: (Array.isArray(hits) ? hits : []).slice(0, 3).map((h: any) => ({ id: h?._id, score: h?._score }))
+      });
+    } catch {
+      // best-effort fallback 2
+    }
+  }
+
+  return (hits || []).map((hit: any, i: number) => ({
     id: `evt:${hit._id}`,
     text: hit._source?.content || "",
     score: hit._score ?? 0,
