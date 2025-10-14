@@ -690,18 +690,39 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
   try {
     traceWrite("retrieve.pre_context", {});
   } catch { /* ignore */ void 0; }
+  try { traceWrite("retrieve.guard.before_ctx", {}); } catch { /* ignore */ void 0; }
 
-  const active: Context = requireContext();
+  let active: Context;
   try {
-    traceWrite("retrieve.post_context", {
-      tenant_id: active.tenant_id,
-      project_id: active.project_id,
-      context_id: active.context_id,
-      task_id: active.task_id,
-      env: active.env,
-      api_version: active.api_version
-    });
-  } catch { /* ignore */ void 0; }
+    active = requireContext();
+    try {
+      traceWrite("retrieve.post_context", {
+        tenant_id: active.tenant_id,
+        project_id: active.project_id,
+        context_id: active.context_id,
+        task_id: active.task_id,
+        env: active.env,
+        api_version: active.api_version
+      });
+      traceWrite("retrieve.guard.after_ctx", { hasActive: true });
+    } catch { /* ignore */ void 0; }
+  } catch (err) {
+    // Fallback when no active context is set: use default tenant/project and any provided params
+    const p: any = (req as any)?.params || {};
+    const tenant = process.env.MEMORA_DEFAULT_TENANT || "memora";
+    const project = process.env.MEMORA_DEFAULT_PROJECT || "benchmarks";
+    active = {
+      tenant_id: String(tenant),
+      project_id: String(project),
+      context_id: (p.context_id as any) ?? null,
+      task_id: (p.task_id as any) ?? null,
+      env: (p.filters?.env as any) ?? undefined,
+      api_version: (p.filters?.api_version as any) ?? undefined
+    } as Context;
+    try {
+      traceWrite("retrieve.context_fallback", { tenant_id: active.tenant_id, project_id: active.project_id });
+    } catch { /* ignore */ void 0; }
+  }
 
   const q = req.params as RetrievalQuery;
   const q2 = q as RetrievalQuery;
@@ -746,7 +767,9 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
 
   // Stage A: Episodic (BM25 / match)
   const tE = Date.now();
+  try { traceWrite("retrieve.guard.before_epi", {}); } catch { /* ignore */ void 0; }
   const episodicHits = await episodicSearch(q2, fopts);
+  try { traceWrite("retrieve.guard.after_epi", { hits: episodicHits.length }); } catch { /* ignore */ void 0; }
   log("stage.episodic", { hits: episodicHits.length, tookMs: Date.now() - tE });
 
   // Stage B: Semantic (k-NN + filters) — gated by config.stages.semantic.enabled
