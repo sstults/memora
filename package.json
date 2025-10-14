@@ -19,7 +19,9 @@
     "prepare": "husky",
     "dev:trace:episodic": "bash scripts/dev/tail_episodic_index.sh",
     "dev:trace:episodic:follow": "FOLLOW=1 bash scripts/dev/tail_episodic_index.sh",
-    "dev:trace:filter": "bash scripts/dev/filter_trace.sh"
+    "dev:trace:filter": "bash scripts/dev/filter_trace.sh",
+    "smoke:write": "node --import ./scripts/register-ts-node.mjs scripts/dev/mcp_write_smoke.ts",
+    "smoke:retrieve": "node --import ./scripts/register-ts-node.mjs scripts/dev/mcp_retrieve_smoke.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.19.1",
