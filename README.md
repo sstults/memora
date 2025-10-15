@@ -6,6 +6,66 @@ It is designed to support **long-running tasks, multi-project contexts, and coll
 
 ---
 
+> Branch notice: This branch (refactor/minimal-poc) implements the Minimal POC scope. Only episodic write and lexical BM25 retrieval are active by default. Semantic search, facts, fusion/RRF, diversity, rerank, and other non-critical features are isolated to feature branches or the archival branch. See "Branching model" below.
+
+### Minimal POC Quickstart (episodic-only)
+
+1) Start OpenSearch
+```bash
+docker compose -f docker/docker-compose.yml up -d
+```
+
+2) Configure environment
+```bash
+cp .env.example .env
+# Required for local Docker:
+export OPENSEARCH_URL=http://localhost:9200
+# On first run you can let Memora bootstrap episodic templates/indices:
+export MEMORA_BOOTSTRAP_OS=1
+```
+
+3) Start the MCP server
+```bash
+npm install
+npm run dev
+```
+
+4) Create episodic indices manually (optional alternative to MEMORA_BOOTSTRAP_OS)
+```bash
+./scripts/create_indices.sh
+```
+
+5) Minimal flow smoke
+- Set or ensure context via MCP: context.ensure_context
+- Write an event: memory.write
+- Retrieve episodic memories (BM25 only): memory.retrieve
+
+Diagnostics and smoke script
+- For a quick end-to-end validation with trace tails, run:
+  ```bash
+  bash scripts/dev/run_smokes_and_tail.sh
+  ```
+  This will:
+  - Start OpenSearch via docker-compose
+  - Build the TypeScript dist
+  - Run smoke:write with MEMORA_BOOTSTRAP_OS=1 MEMORA_BOOTSTRAP_CREATE_TODAY=true
+  - Tail episodic.index.* traces from outputs/memora/trace/retrieve.ndjson
+  - Run smoke:retrieve and print top snippets
+  - Tail retrieve.* guard markers and episodic.* search markers
+
+- You can also tail interactively:
+  ```bash
+  npm run dev:trace:episodic:follow
+  ```
+  Or filter the trace file:
+  ```bash
+  npm run dev:trace:filter
+  ```
+
+Notes:
+- Do not set embedding or rerank env vars on this branch; those features are off by default.
+- Integration/bench/ML-related scripts live on feature branches or the archival branch.
+
 ## Features
 
 - **Context Management**
@@ -533,6 +593,40 @@ Example B — Response-time reranking:
   - The pipeline runs transparently for all searches on that index.
   - Use MEMORA_OS_SEARCH_DEFAULT_PIPELINE_ATTACH=true with ensureSearchPipelineFromEnv or call attachDefaultSearchPipelineToIndex().
   - Best for consistent behavior across all queries once validated.
+
+## Diagnostics gating
+
+- Default minimal markers (always on):
+  - retrieve.begin, retrieve.end
+  - episodic.body_once
+  - episodic.index.request / episodic.index.response / episodic.index.ok
+
+- Enable broader diagnostics temporarily during investigation:
+  - Env override: set MEMORA_DIAGNOSTICS=1 to enable all gated categories
+  - Or use YAML flags in config/retrieval.yaml:
+    diagnostics:
+      enabled: false
+      guard_traces: false
+      fallback_traces: false
+      request_response_traces: false
+
+- Categories (gated when not using MEMORA_DIAGNOSTICS=1):
+  - Guard traces: retrieve.guard.*, retrieve.pre_context, retrieve.post_context, retrieve.params, retrieve.diag, retrieve.ckpt, retrieve.finally
+  - Fallback traces: episodic.fallback* (retry shapes when zero hits)
+  - Request/Response traces: episodic.request, episodic.response (verbose; request bodies are logged only once per process via episodic.body_once)
+
+Example:
+```bash
+export MEMORA_DIAGNOSTICS=1
+npm run smoke:retrieve
+```
+
+### Troubleshooting: vector dimension mismatch (semantic)
+- Symptom: bootstrap prints a knn_vector dimension mismatch (e.g., 384 vs expected 1024).
+- Remediation when re-enabling semantic:
+  - Set MEMORA_EMBED_DIM to match your semantic index template, or
+  - Set MEMORA_OS_AUTOFIX_VECTOR_DIM=true to auto-adjust the knn_vector dimension during bootstrap.
+- See "OpenSearch bootstrap and health gating" above for related environment variables.
 
 ## Release (GitHub-only)
 
