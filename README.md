@@ -8,6 +8,26 @@ It is designed to support **long-running tasks, multi-project contexts, and coll
 
 > Branch notice: This branch (refactor/minimal-poc) implements the Minimal POC scope. Only episodic write and lexical BM25 retrieval are active by default. Semantic search, facts, fusion/RRF, diversity, rerank, and other non-critical features are isolated to feature branches or the archival branch. See "Branching model" below.
 
+## Branching model
+
+- main (Minimal POC)
+  - Only memory.write and memory.retrieve are registered tools.
+  - Diagnostics are quiet by default; advanced stages remain disabled via config.
+  - No re-enabling of semantic/facts/packing/promotion/rerank on main by default.
+- archive/full-featured
+  - Read-only reference with full features prior to slimdown. Do not merge into main.
+- feature/*
+  - Develop and validate features in isolation (e.g., feature/re-enable-semantic, feature/facts-and-pack).
+  - Keep defaults off; update tests and docs in-branch.
+- hotfix/*
+  - Emergency fixes to main that preserve Minimal POC invariants.
+
+Tags
+- v-before-slimdown: commit immediately before slimdown (full-featured reference).
+- v-minimal-poc: the slimdown commit point (Minimal POC reference).
+
+For the full policy, see docs/branch-governance.md.
+
 ### Minimal POC Quickstart (episodic-only)
 
 1) Start OpenSearch
