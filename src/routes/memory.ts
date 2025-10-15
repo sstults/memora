@@ -310,6 +310,8 @@ export function registerMemory(server: any) {
       return handleRetrieve({ params: args });
     }
   );
+
+
   // Diagnostics: confirm tools registered in this process
   try {
     traceWrite("memory.tools_registered", {
@@ -1172,7 +1174,7 @@ async function touchLastUsed(memIds: string[]) {
   await bulkSafe(body, false);
 }
 
-// ---- Facts (1–2 hop expansion; here we just keyword-match s/p/o)
+
 
 
  // ---- Utilities ----
