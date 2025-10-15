@@ -1124,8 +1124,9 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
     }
   }
   
-  // Fallback 3: if still zero, relax tag filter to improve recall
-  if (!Array.isArray(hits) || hits.length === 0) {
+  // Fallback 3: if still zero, relax tag filter to improve recall (gated by fallbacks.episodic_relax_tags)
+  const allowFallback3 = retrievalBoolean("fallbacks.episodic_relax_tags", false);
+  if ((!Array.isArray(hits) || hits.length === 0) && allowFallback3) {
     try {
       const eoptsNoTags: FilterOptions = {
         tenant_id: fopts.tenant_id,
@@ -1158,8 +1159,9 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
     }
   }
   
-  // Fallback 4: if still zero, ignore objective and return most recent docs satisfying tenant/project and tag filters
-  if (!Array.isArray(hits) || hits.length === 0) {
+  // Fallback 4: if still zero, ignore objective and return most recent docs satisfying tenant/project and tag filters (gated by fallbacks.episodic_recent_docs)
+  const allowFallback4 = retrievalBoolean("fallbacks.episodic_recent_docs", false);
+  if ((!Array.isArray(hits) || hits.length === 0) && allowFallback4) {
     try {
       const filter3 = buildBoolFilter(eopts); // include tags if provided
       const fallback4Body: any = {
