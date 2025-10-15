@@ -8,13 +8,14 @@ import { getClient, bulkSafe, indexWithRetries, searchWithRetries, withRetries }
 import { embed } from "../services/embedder.js";
 import { scoreSalience, atomicSplit, summarizeIfLong, redact } from "../services/salience.js";
 import { policyNumber, policyArray, retrievalNumber, retrievalArray, retrievalBoolean, retrievalString } from "../services/config.js";
+import { packPrompt } from "../services/packer.js";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 
 import { requireContext } from "./context.js";
 import { buildBoolFilter, FilterOptions } from "../domain/filters.js";
-import type { Hit as FusedHit } from "../domain/fusion.js";
+import { fuseAndDiversify, type Hit as FusedHit } from "../domain/fusion.js";
 import {
   Context,
   Event,
@@ -310,6 +311,31 @@ export function registerMemory(server: any) {
       return handleRetrieve({ params: args });
     }
   );
+  // Feature: memory.retrieve_and_pack (off-by-default; tool available on this branch)
+  server.tool(
+    "memory.retrieve_and_pack",
+    "Retrieve snippets and return a packed prompt using config/packing.yaml.",
+    {
+      objective: z.string().describe("Natural-language query objective"),
+      budget: z.number().optional().describe("Max number of items to return (top-K budget)"),
+      system: z.string().optional(),
+      task_frame: z.string().optional(),
+      tool_state: z.string().optional(),
+      recent_turns: z.string().optional(),
+      filters: z.object({
+        scope: z.array(z.string()).optional(),
+        tags: z.array(z.string()).optional(),
+        api_version: z.string().optional(),
+        env: z.string().optional()
+      }).optional(),
+      context_id: z.string().optional(),
+      task_id: z.string().optional()
+    },
+    async (args: any) => {
+      return handleRetrieveAndPack({ params: args });
+    }
+  );
+
   // Diagnostics: confirm tools registered in this process
   try {
     traceWrite("memory.tools_registered", {
@@ -732,17 +758,42 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
   }
   log("stage.episodic", { hits: episodicHits.length, tookMs: Date.now() - tE });
 
-  // Stage B: Semantic (k-NN + filters) — gated by config.stages.semantic.enabled
-  const semanticHits: FusedHit[] = [];
+  // Stage B: Semantic disabled on this branch (gated by config)
   log("stage.semantic", { hits: 0, tookMs: 0 });
 
   // Stage C: Facts (1–2 hop expansion) — gated by config.stages.facts.enabled
-  const factHits: FusedHit[] = [];
-  log("stage.facts", { hits: 0, tookMs: 0 });
+  let factHits: FusedHit[] = [];
+  if (retrievalBoolean("stages.facts.enabled", false)) {
+    const tF = Date.now();
+    factHits = await factsSearch(q2, fopts);
+    log("stage.facts", { hits: factHits.length, tookMs: Date.now() - tF });
+  } else {
+    log("stage.facts", { hits: 0, tookMs: 0 });
+  }
 
   // Fuse + optional rerank
-  let fused: FusedHit[] = episodicHits.slice(0, budget);
-  log("fuse", { episodic: episodicHits.length, semantic: semanticHits.length, facts: factHits.length, fused: fused.length });
+  let fused: FusedHit[];
+  if (retrievalBoolean("stages.facts.enabled", false)) {
+    fused = fuseAndDiversify(
+      episodicHits,
+      [], // semantic disabled by default on this branch
+      factHits,
+      {
+        limit: budget,
+        rrfK: getPolicy("fusion.rrf_k", 60),
+        normalizeScores: retrievalBoolean("fusion.normalize_scores", true),
+        mmr: {
+          enabled: retrievalBoolean("diversity.enabled", false) && !isTemporalQuery(q2.objective),
+          lambda: getPolicy("diversity.lambda", 0.8),
+          minDistance: getPolicy("diversity.min_distance", 0.2),
+          maxPerTag: getPolicy("diversity.max_per_tag", 5)
+        }
+      }
+    );
+  } else {
+    fused = episodicHits.slice(0, budget);
+  }
+  log("fuse", { episodic: episodicHits.length, semantic: 0, facts: factHits.length, fused: fused.length });
 
 
   // Touch last_used for semantic docs we return
@@ -1052,7 +1103,76 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
 
 // ---- Semantic k-NN
 
-// ---- Facts (1–2 hop expansion; here we just keyword-match s/p/o)
+ // ---- Facts (1–2 hop expansion; keyword over s/p/o)
+async function factsSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<FusedHit[]> {
+  const size = getPolicy("stages.facts.top_k", 40);
+
+  // Facts docs contain tenant_id, project_id, fact fields (s/p/o); no scope/task/env filters
+  const ffopts: FilterOptions = {
+    tenant_id: fopts.tenant_id,
+    project_id: fopts.project_id
+  } as any;
+
+  const bf = buildBoolFilter(ffopts);
+
+  const body = {
+    size,
+    query: {
+      bool: {
+        must: [
+          {
+            multi_match: {
+              query: q.objective,
+              fields: ["s^1.5", "o^1", "p^0.5"]
+            }
+          }
+        ],
+        filter: bf.bool.filter ?? [],
+        must_not: bf.bool.must_not ?? []
+      }
+    }
+  };
+
+  const resp = await searchWithRetries({ index: FACTS_INDEX, body });
+  const hits: any[] = (resp?.body?.hits?.hits ?? []);
+  return hits.map((hit: any, i: number) => ({
+    id: `fact:${hit._id}`,
+    text: `${hit._source?.s} ${hit._source?.p} ${hit._source?.o}`,
+    score: hit._score ?? 0,
+    rank: i + 1,
+    source: "facts" as const,
+    tags: ["fact"],
+    why: "facts: structured relation",
+    meta: {}
+  }));
+}
+
+ // ---- Retrieve and Pack (packs sections using config/packing.yaml)
+async function handleRetrieveAndPack(req: any) {
+  // Normalize arguments and delegate retrieval to handleRetrieve (context handling inside)
+  (req as any).params = normalizeParamsContainer(req);
+  const rres = await handleRetrieve({ params: req.params });
+
+  const system = String(req.params?.system ?? "");
+  const task_frame = String(req.params?.task_frame ?? "");
+  const tool_state = String(req.params?.tool_state ?? "");
+  const recent_turns = String(req.params?.recent_turns ?? "");
+
+  const retrievedText = rres.snippets
+    .map((s, i) => `[#${i + 1}] (${s.source}; score=${(s.score ?? 0).toFixed(3)}) ${s.text}`)
+    .join("\n");
+
+  const sections = [
+    system ? { name: "system", content: system } : null,
+    task_frame ? { name: "task_frame", content: task_frame } : null,
+    tool_state ? { name: "tool_state", content: tool_state } : null,
+    retrievedText ? { name: "retrieved", content: retrievedText } : null,
+    recent_turns ? { name: "recent_turns", content: recent_turns } : null
+  ].filter(Boolean) as { name: string; content: string }[];
+
+  const packed_prompt = packPrompt(sections);
+  return { snippets: rres.snippets, packed_prompt };
+}
 
 
  // ---- Utilities ----
