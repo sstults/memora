@@ -40,15 +40,73 @@ function currentTraceFile(): string {
 }
 
 function traceWrite(event: string, payload: any) {
-  // Write if a trace file is configured, regardless of MEMORA_QUERY_TRACE
   const file = currentTraceFile();
   if (!file) return;
+
+  // Diagnostics gating:
+  // - Default: only minimal markers are written (retrieve.begin/end, episodic.body_once, episodic.index.*)
+  // - Enable broader traces via either:
+  //     MEMORA_DIAGNOSTICS=1 (env override)
+  //   or retrieval.yaml:
+  //     diagnostics.enabled: true
+  //     diagnostics.guard_traces: true
+  //     diagnostics.fallback_traces: true
+  //     diagnostics.request_response_traces: true
+  const envDiag = (process.env.MEMORA_DIAGNOSTICS || "").trim() === "1";
+  const diagEnabled = envDiag || retrievalBoolean("diagnostics.enabled", false);
+
+  // Always-on minimal markers for post-stabilization:
+  const alwaysOn =
+    event === "retrieve.begin" ||
+    event === "retrieve.end" ||
+    event === "episodic.body_once" ||
+    event.startsWith("episodic.index.");
+
+  // Per-category flags (env override enables all categories)
+  const guardAllowed = diagEnabled && (envDiag || retrievalBoolean("diagnostics.guard_traces", false));
+  const fallbackAllowed = diagEnabled && (envDiag || retrievalBoolean("diagnostics.fallback_traces", false));
+  const reqRespAllowed = diagEnabled && (envDiag || retrievalBoolean("diagnostics.request_response_traces", false));
+
+  // Category-based gating
+  if (!alwaysOn) {
+    if (
+      event.startsWith("retrieve.guard") ||
+      event === "retrieve.pre_context" ||
+      event === "retrieve.post_context" ||
+      event === "retrieve.finally" ||
+      event === "retrieve.params" ||
+      event === "retrieve.diag" ||
+      event === "retrieve.ckpt"
+    ) {
+      if (!guardAllowed) return;
+    } else if (event.startsWith("episodic.fallback")) {
+      if (!fallbackAllowed) return;
+    } else if (event === "episodic.request" || event === "episodic.response") {
+      if (!reqRespAllowed) return;
+    } else if (!diagEnabled) {
+      // All other non-essential events require diagnostics to be enabled
+      return;
+    }
+  }
+
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.appendFileSync(
       file,
       JSON.stringify({ ts: new Date().toISOString(), event, ...payload }) + "\n"
     );
+  } catch {
+    // ignore
+  }
+}
+
+// Trace episodic search body once per process for reproduction
+let EPI_BODY_LOGGED_ONCE = false;
+function traceEpisodicBodyOnce(index: string, body: any) {
+  if (EPI_BODY_LOGGED_ONCE) return;
+  EPI_BODY_LOGGED_ONCE = true;
+  try {
+    traceWrite("episodic.body_once", { index, body });
   } catch {
     // ignore
   }
@@ -338,8 +396,8 @@ export function registerMemory(server: any) {
 // memory.write
 // =========================
 async function handleWrite(req: any) {
-  // Use SDK-provided params when present; otherwise normalize from envelope
-  if (!(req as any)?.params || (typeof (req as any).params === "object" && Object.keys((req as any).params || {}).length === 0)) {
+  // Normalize envelopes: if params missing OR not an object OR missing 'content', extract from envelope
+  if (!(req as any)?.params || typeof (req as any).params !== "object" || !("content" in (req as any).params)) {
     (req as any).params = normalizeParamsContainer(req);
   }
   try {
@@ -448,21 +506,36 @@ async function handleWrite(req: any) {
   // Wrap indexing in try/catch to trace failures as well
   try {
     const FORCE_DIRECT = (process.env.MEMORA_FORCE_EPI_DIRECT_WRITE || "") === "1";
+    let res: any;
     if (FORCE_DIRECT) {
       const client = getClient();
-      await withRetries(() => client.index({
+      res = await withRetries(() => client.index({
         index: episodicIndex,
         id: event.event_id,
         body: flattenEventForIndex(event),
         refresh: true
       } as any));
     } else {
-      await indexWithRetries({
+      res = await indexWithRetries({
         index: episodicIndex,
         id: event.event_id,
         body: flattenEventForIndex(event),
         refresh: true
       });
+    }
+    // Inspect result to assert success; surface failures in trace and throw
+    try {
+      const body = (res as any)?.body ?? res;
+      const statusCode = (res as any)?.statusCode ?? null;
+      const result = body?.result ?? null;
+      const _id = body?._id ?? event.event_id;
+      traceWrite("episodic.index.response", { index: episodicIndex, id: _id, result, statusCode });
+      if ((statusCode && Number(statusCode) >= 300) || (result && !["created", "updated"].includes(String(result)))) {
+        traceWrite("episodic.index.fail", { index: episodicIndex, id: _id, result, statusCode });
+        throw new Error(`Episodic index failed: status=${statusCode} result=${result}`);
+      }
+    } catch (inner) {
+      // If parsing failed, still continue to ok trace below; outer catch will handle thrown errors
     }
     traceWrite("episodic.index.ok", { index: episodicIndex, id: event.event_id });
     // Back-compat event
@@ -592,35 +665,14 @@ async function handleWrite(req: any) {
  */
 // =========================
 async function handleRetrieve(req: any): Promise<RetrievalResult> {
-  // Prefer SDK-provided params; only normalize if missing/empty
-  const incoming = (req as any)?.params;
-  let normalizedParams: any = undefined;
-
-  // Detect when req.params is actually the SDK envelope (not user arguments)
-  const looksLikeEnvelope =
-    incoming && typeof incoming === "object" &&
-    ("sendRequest" in incoming || "requestInfo" in incoming || "sessionId" in incoming || "signal" in incoming || "_meta" in incoming);
-
-  if (incoming && typeof incoming === "object" && Object.keys(incoming).length > 0 && !looksLikeEnvelope) {
-    // params already looks like plain user args
-    normalizedParams = incoming;
-  } else if (incoming && looksLikeEnvelope) {
-    // Extract from the envelope first
-    normalizedParams = normalizeParamsContainer(incoming);
-  }
-
-  // Fallback: extract from the whole request envelope (req.arguments, req.requestInfo, etc.)
-  if (!normalizedParams || Object.keys(normalizedParams || {}).length === 0) {
-    normalizedParams = normalizeParamsContainer(req);
-  }
-
-
-  (req as any).params = normalizedParams;
+  // Normalize params from various envelopes (handles plain args, {params:{...}}, SDK shapes)
+  (req as any).params = normalizeParamsContainer((req as any)?.params ?? req);
 
   // Early trace to confirm entry into handler (post-normalization)
   try {
-    const hasParams = normalizedParams && typeof normalizedParams === "object" && Object.keys(normalizedParams).length > 0;
-    traceWrite("retrieve.enter", { hasParams, keys: Object.keys((req as any)?.params || []), objective: String((req as any)?.params?.objective ?? "") });
+    const p: any = (req as any)?.params || {};
+    const hasParams = p && typeof p === "object" && Object.keys(p).length > 0;
+    traceWrite("retrieve.enter", { hasParams, keys: Object.keys(p || {}), objective: String(p?.objective ?? "") });
   } catch {
     // ignore
   }
@@ -663,9 +715,39 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
   try {
     traceWrite("retrieve.pre_context", {});
   } catch { /* ignore */ void 0; }
+  try { traceWrite("retrieve.guard.before_ctx", {}); } catch { /* ignore */ void 0; }
 
-  const active: Context = requireContext();
-  try { traceWrite("retrieve.post_context", {}); } catch { /* ignore */ void 0; }
+  let active: Context;
+  try {
+    active = requireContext();
+    try {
+      traceWrite("retrieve.post_context", {
+        tenant_id: active.tenant_id,
+        project_id: active.project_id,
+        context_id: active.context_id,
+        task_id: active.task_id,
+        env: active.env,
+        api_version: active.api_version
+      });
+      traceWrite("retrieve.guard.after_ctx", { hasActive: true });
+    } catch { /* ignore */ void 0; }
+  } catch (err) {
+    // Fallback when no active context is set: use default tenant/project and any provided params
+    const p: any = (req as any)?.params || {};
+    const tenant = process.env.MEMORA_DEFAULT_TENANT || "memora";
+    const project = process.env.MEMORA_DEFAULT_PROJECT || "benchmarks";
+    active = {
+      tenant_id: String(tenant),
+      project_id: String(project),
+      context_id: (p.context_id as any) ?? null,
+      task_id: (p.task_id as any) ?? null,
+      env: (p.filters?.env as any) ?? undefined,
+      api_version: (p.filters?.api_version as any) ?? undefined
+    } as Context;
+    try {
+      traceWrite("retrieve.context_fallback", { tenant_id: active.tenant_id, project_id: active.project_id });
+    } catch { /* ignore */ void 0; }
+  }
 
   const q = req.params as RetrievalQuery;
   const q2 = q as RetrievalQuery;
@@ -710,7 +792,16 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
 
   // Stage A: Episodic (BM25 / match)
   const tE = Date.now();
-  const episodicHits = await episodicSearch(q2, fopts);
+  let episodicHits: FusedHit[] = [];
+  try {
+    traceWrite("retrieve.guard.before_epi", {});
+    episodicHits = await episodicSearch(q2, fopts);
+  } catch (e) {
+    try { traceWrite("retrieve.guard.epi_error", { error: String(e) }); } catch { /* ignore */ void 0; }
+    throw e;
+  } finally {
+    try { traceWrite("retrieve.guard.after_epi", { hits: Array.isArray(episodicHits) ? episodicHits.length : -1 }); } catch { /* ignore */ void 0; }
+  }
   log("stage.episodic", { hits: episodicHits.length, tookMs: Date.now() - tE });
 
   // Stage B: Semantic (k-NN + filters) — gated by config.stages.semantic.enabled
@@ -742,6 +833,7 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
 
   log("retrieve.end", { totalMs: Date.now() - t0, snippets: snippets.length });
   traceWrite("retrieve.end", { totalMs: Date.now() - t0, snippets: snippets.length });
+  try { traceWrite("retrieve.finally", { phase: "after_end" }); } catch { /* ignore */ void 0; }
   return { snippets };
 }
 
@@ -840,7 +932,10 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
   const useShingles = retrievalBoolean("lexical.use_shingles", true);
   const fields = [
     "content^3",
-    ...(useShingles ? ["content.shingles^1.2"] : [])
+    ...(useShingles ? ["content.shingles^1.2"] : []),
+    "tags^2",
+    "artifacts^1",
+    "content.raw^0.5"
   ];
   const mmType = retrievalString("lexical.multi_match_type", "best_fields");
   const tieBreaker = retrievalNumber("lexical.tie_breaker", 0.3);
@@ -894,16 +989,18 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
           // For temporal queries, allow either the question tokens OR date/number patterns to match
           should: [mmClause, ...shouldClauses],
           minimum_should_match: 1,
-          must: filter.bool.must || [],
-          filter: filter.bool.filter,
+          must: [],
+          // Move tenant/project constraints to filter to avoid unintended must interactions
+          filter: [...(filter.bool.filter || []), ...(filter.bool.must || [])],
           must_not: filter.bool.must_not
         }
       }
     : {
         bool: {
-          must: [mmClause, ...(filter.bool.must || [])],
+          // Keep lexical clause in must; move constraints to filter for stability and recall
+          must: [mmClause],
           ...(shouldClauses.length ? { should: shouldClauses } : {}),
-          filter: filter.bool.filter,
+          filter: [...(filter.bool.filter || []), ...(filter.bool.must || [])],
           must_not: filter.bool.must_not
         }
       };
@@ -946,10 +1043,11 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
       // best-effort logging
     }
   }
-  const resp = await searchWithRetries({ index: `${EPISODIC_PREFIX}*`, body });
+  try { traceEpisodicBodyOnce(`${EPISODIC_PREFIX}*`, body); } catch { /* ignore */ void 0; }
+  let resp = await searchWithRetries({ index: `${EPISODIC_PREFIX}*`, body });
+  let hits: any[] = resp?.body?.hits?.hits || [];
   {
     try {
-      const hits: any[] = resp?.body?.hits?.hits || [];
       traceWrite("episodic.response", {
         took: resp?.body?.took,
         total: (resp?.body?.hits as any)?.total ?? null,
@@ -960,7 +1058,75 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
       // best-effort logging
     }
   }
-  return (resp.body.hits?.hits || []).map((hit: any, i: number) => ({
+
+  // Fallback: if zero episodic hits, retry with a simpler match query and relaxed filter placement
+  if (!Array.isArray(hits) || hits.length === 0) {
+    try {
+      const fallbackBody: any = {
+        size: getPolicy("stages.episodic.top_k", 25),
+        query: {
+          bool: {
+            must: [
+              { match: { content: { query: String(q.objective ?? ""), operator: "or" } } }
+            ],
+            // Move tenant/project terms to filter to avoid accidental scoring interference
+            filter: [...(filter.bool.filter || []), ...(filter.bool.must || [])],
+            must_not: filter.bool.must_not || []
+          }
+        }
+      };
+      traceWrite("episodic.fallback.request", { index: `${EPISODIC_PREFIX}*`, query: fallbackBody.query });
+      resp = await searchWithRetries({ index: `${EPISODIC_PREFIX}*`, body: fallbackBody });
+      hits = resp?.body?.hits?.hits || [];
+      traceWrite("episodic.fallback.response", {
+        took: resp?.body?.took,
+        total: (resp?.body?.hits as any)?.total ?? null,
+        count: Array.isArray(hits) ? hits.length : 0,
+        sample: (Array.isArray(hits) ? hits : []).slice(0, 3).map((h: any) => ({ id: h?._id, score: h?._score }))
+      });
+    } catch {
+      // best-effort fallback
+    }
+  }
+
+  // Fallback 2: broaden to simple_query_string over content/raw/tags with OR operator
+  if (!Array.isArray(hits) || hits.length === 0) {
+    try {
+      const fallback2Body: any = {
+        size: getPolicy("stages.episodic.top_k", 25),
+        query: {
+          bool: {
+            must: [
+              {
+                simple_query_string: {
+                  query: String(q.objective ?? ""),
+                  fields: ["content^3", "content.raw^0.5", "tags^2"],
+                  default_operator: "or"
+                }
+              }
+            ],
+            filter: [...(filter.bool.filter || []), ...(filter.bool.must || [])],
+            must_not: filter.bool.must_not || []
+          }
+        }
+      };
+      traceWrite("episodic.fallback2.request", { index: `${EPISODIC_PREFIX}*`, query: fallback2Body.query });
+      resp = await searchWithRetries({ index: `${EPISODIC_PREFIX}*`, body: fallback2Body });
+      hits = resp?.body?.hits?.hits || [];
+      traceWrite("episodic.fallback2.response", {
+        took: resp?.body?.took,
+        total: (resp?.body?.hits as any)?.total ?? null,
+        count: Array.isArray(hits) ? hits.length : 0,
+        sample: (Array.isArray(hits) ? hits : []).slice(0, 3).map((h: any) => ({ id: h?._id, score: h?._score }))
+      });
+    } catch {
+      // best-effort fallback 2
+    }
+  }
+  
+  
+  
+  return (hits || []).map((hit: any, i: number) => ({
     id: `evt:${hit._id}`,
     text: hit._source?.content || "",
     score: hit._score ?? 0,
