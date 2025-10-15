@@ -69,11 +69,6 @@ fallbacks:
   semantic_empty_to_episodic: true
   # If still nothing, fall back to project-wide default docs
   project_fallback_docs: true
-  # Diagnostic-only episodic fallbacks (default off). Enable during investigation:
-  # - episodic_relax_tags: retries without tag filters
-  # - episodic_recent_docs: returns recent docs ignoring objective (tenant/project filters only)
-  episodic_relax_tags: false
-  episodic_recent_docs: false
 
 diagnostics:
   enabled: false
