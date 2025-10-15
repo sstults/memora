@@ -14,7 +14,7 @@ import { z } from "zod";
 
 import { requireContext } from "./context.js";
 import { buildBoolFilter, FilterOptions } from "../domain/filters.js";
-import type { Hit as FusedHit } from "../domain/fusion.js";
+import { fuseAndDiversify, type Hit as FusedHit } from "../domain/fusion.js";
 import {
   Context,
   Event,
@@ -732,21 +732,53 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
   }
   log("stage.episodic", { hits: episodicHits.length, tookMs: Date.now() - tE });
 
-  // Stage B: Semantic (k-NN + filters) — gated by config.stages.semantic.enabled
-  const semanticHits: FusedHit[] = [];
-  log("stage.semantic", { hits: 0, tookMs: 0 });
+   // Stage B: Semantic (k-NN + filters) — gated by config.stages.semantic.enabled
+  let semanticHits: FusedHit[] = [];
+  if (retrievalBoolean("stages.semantic.enabled", false)) {
+    const tS = Date.now();
+    semanticHits = await semanticSearch(q2, fopts);
+    log("stage.semantic", { hits: semanticHits.length, tookMs: Date.now() - tS });
+  } else {
+    log("stage.semantic", { hits: 0, tookMs: 0 });
+  }
 
   // Stage C: Facts (1–2 hop expansion) — gated by config.stages.facts.enabled
   const factHits: FusedHit[] = [];
   log("stage.facts", { hits: 0, tookMs: 0 });
 
-  // Fuse + optional rerank
-  let fused: FusedHit[] = episodicHits.slice(0, budget);
+   // Fuse + optional rerank
+  let fused: FusedHit[];
+  if (retrievalBoolean("stages.semantic.enabled", false)) {
+    fused = fuseAndDiversify(
+      episodicHits,
+      semanticHits,
+      factHits,
+      {
+        limit: budget,
+        rrfK: getPolicy("fusion.rrf_k", 60),
+        normalizeScores: retrievalBoolean("fusion.normalize_scores", true),
+        mmr: {
+          enabled: retrievalBoolean("diversity.enabled", false) && !isTemporalQuery(q2.objective),
+          lambda: getPolicy("diversity.lambda", 0.8),
+          minDistance: getPolicy("diversity.min_distance", 0.2),
+          maxPerTag: getPolicy("diversity.max_per_tag", 5)
+        }
+      }
+    );
+  } else {
+    fused = episodicHits.slice(0, budget);
+  }
   log("fuse", { episodic: episodicHits.length, semantic: semanticHits.length, facts: factHits.length, fused: fused.length });
 
 
-  // Touch last_used for semantic docs we return
-  // semantic.touch skipped in minimal POC
+  // Touch last_used for semantic docs we return (only when semantic enabled)
+  if (retrievalBoolean("stages.semantic.enabled", false)) {
+    const semanticIds = (Array.isArray(fused) ? fused : [])
+      .filter(h => h.source === "semantic")
+      .map(h => h.id);
+    await touchLastUsed(semanticIds);
+    log("semantic.touch", { count: semanticIds.length });
+  }
 
   // Optionally compress/package on the server; often you’ll pack in the client
   const snippets = fused.map(h => ({
@@ -1050,7 +1082,95 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
   }));
 }
 
-// ---- Semantic k-NN
+ // ---- Semantic k-NN
+function buildSemanticQueryText(q: RetrievalQuery): string {
+  // For semantic embedding, use only the natural-language objective.
+  return String(q.objective ?? "");
+}
+
+async function semanticSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<FusedHit[]> {
+  const qvec = await embed(buildSemanticQueryText(q));
+  const size = getPolicy("stages.semantic.top_k", 150);
+
+  const sfopts: FilterOptions = {
+    tenant_id: fopts.tenant_id,
+    project_id: fopts.project_id,
+    context_id: fopts.context_id,
+    // semantic docs do not persist task_id; filter by scope/context instead
+    scopes: fopts.scopes,
+    tags: fopts.tags,
+    api_version: fopts.api_version,
+    env: fopts.env,
+    exclude_tags: fopts.exclude_tags
+  };
+  const bf = buildBoolFilter(sfopts);
+  const innerBool: any = {
+    filter: bf.bool.filter || []
+  };
+  if (bf.bool.must && bf.bool.must.length) innerBool.must = bf.bool.must;
+  if (bf.bool.must_not && bf.bool.must_not.length) innerBool.must_not = bf.bool.must_not;
+
+  // Use script_score with knn_score for widest OS compatibility (lucene engine + cosinesimil)
+  const body = {
+    size,
+    query: {
+      script_score: {
+        query: { bool: innerBool },
+        script: {
+          source: "knn_score",
+          lang: "knn",
+          params: {
+            field: "embedding",
+            query_value: qvec,
+            space_type: "cosinesimil"
+          }
+        }
+      }
+    }
+  };
+
+  const resp = await searchWithRetries({ index: SEMANTIC_INDEX, body });
+  let hits: any[] = (resp?.body?.hits?.hits || []);
+
+  // Fallback: if ANN returns nothing (plugin/syntax variance), use BM25 over text/title with same filters
+  if (!Array.isArray(hits) || hits.length === 0) {
+    const fbBody: any = {
+      size,
+      query: {
+        bool: {
+          must: [
+            { multi_match: { query: q.objective, type: "best_fields", fields: ["text^2", "title^0.5"], tie_breaker: 0.3, operator: "or" } }
+          ],
+          filter: bf.bool.filter ?? [],
+          must_not: bf.bool.must_not ?? []
+        }
+      }
+    };
+    const fbResp = await searchWithRetries({ index: SEMANTIC_INDEX, body: fbBody });
+    hits = fbResp?.body?.hits?.hits || [];
+  }
+
+  return (hits || []).map((hit: any, i: number) => ({
+    id: `mem:${hit._id}`,
+    text: hit._source?.text || hit._source?.title || "",
+    score: hit._score ?? 0,
+    rank: i + 1,
+    source: "semantic" as const,
+    tags: hit._source?.tags || [],
+    why: "semantic: vector similarity",
+    meta: {}
+  }));
+}
+
+async function touchLastUsed(memIds: string[]) {
+  if (!Array.isArray(memIds) || memIds.length === 0) return;
+  const now = new Date().toISOString();
+  const body = memIds.flatMap((fullId) => {
+    const id = fullId.replace(/^mem:/, "");
+    return [{ update: { _index: SEMANTIC_INDEX, _id: id } }, { doc: { last_used: now } }];
+  });
+  await bulkSafe(body, false);
+}
 
 // ---- Facts (1–2 hop expansion; here we just keyword-match s/p/o)
 
