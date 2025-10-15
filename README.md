@@ -594,6 +594,40 @@ Example B — Response-time reranking:
   - Use MEMORA_OS_SEARCH_DEFAULT_PIPELINE_ATTACH=true with ensureSearchPipelineFromEnv or call attachDefaultSearchPipelineToIndex().
   - Best for consistent behavior across all queries once validated.
 
+## Diagnostics gating
+
+- Default minimal markers (always on):
+  - retrieve.begin, retrieve.end
+  - episodic.body_once
+  - episodic.index.request / episodic.index.response / episodic.index.ok
+
+- Enable broader diagnostics temporarily during investigation:
+  - Env override: set MEMORA_DIAGNOSTICS=1 to enable all gated categories
+  - Or use YAML flags in config/retrieval.yaml:
+    diagnostics:
+      enabled: false
+      guard_traces: false
+      fallback_traces: false
+      request_response_traces: false
+
+- Categories (gated when not using MEMORA_DIAGNOSTICS=1):
+  - Guard traces: retrieve.guard.*, retrieve.pre_context, retrieve.post_context, retrieve.params, retrieve.diag, retrieve.ckpt, retrieve.finally
+  - Fallback traces: episodic.fallback* (retry shapes when zero hits)
+  - Request/Response traces: episodic.request, episodic.response (verbose; request bodies are logged only once per process via episodic.body_once)
+
+Example:
+```bash
+export MEMORA_DIAGNOSTICS=1
+npm run smoke:retrieve
+```
+
+### Troubleshooting: vector dimension mismatch (semantic)
+- Symptom: bootstrap prints a knn_vector dimension mismatch (e.g., 384 vs expected 1024).
+- Remediation when re-enabling semantic:
+  - Set MEMORA_EMBED_DIM to match your semantic index template, or
+  - Set MEMORA_OS_AUTOFIX_VECTOR_DIM=true to auto-adjust the knn_vector dimension during bootstrap.
+- See "OpenSearch bootstrap and health gating" above for related environment variables.
+
 ## Release (GitHub-only)
 
 This repository uses a tag-driven GitHub Actions workflow located at `.github/workflows/release.yml`. It runs automatically when you push a tag matching `v*.*.*` (for example, `v0.1.0`). The workflow:

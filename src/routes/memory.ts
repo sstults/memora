@@ -40,9 +40,55 @@ function currentTraceFile(): string {
 }
 
 function traceWrite(event: string, payload: any) {
-  // Write if a trace file is configured, regardless of MEMORA_QUERY_TRACE
   const file = currentTraceFile();
   if (!file) return;
+
+  // Diagnostics gating:
+  // - Default: only minimal markers are written (retrieve.begin/end, episodic.body_once, episodic.index.*)
+  // - Enable broader traces via either:
+  //     MEMORA_DIAGNOSTICS=1 (env override)
+  //   or retrieval.yaml:
+  //     diagnostics.enabled: true
+  //     diagnostics.guard_traces: true
+  //     diagnostics.fallback_traces: true
+  //     diagnostics.request_response_traces: true
+  const envDiag = (process.env.MEMORA_DIAGNOSTICS || "").trim() === "1";
+  const diagEnabled = envDiag || retrievalBoolean("diagnostics.enabled", false);
+
+  // Always-on minimal markers for post-stabilization:
+  const alwaysOn =
+    event === "retrieve.begin" ||
+    event === "retrieve.end" ||
+    event === "episodic.body_once" ||
+    event.startsWith("episodic.index.");
+
+  // Per-category flags (env override enables all categories)
+  const guardAllowed = diagEnabled && (envDiag || retrievalBoolean("diagnostics.guard_traces", false));
+  const fallbackAllowed = diagEnabled && (envDiag || retrievalBoolean("diagnostics.fallback_traces", false));
+  const reqRespAllowed = diagEnabled && (envDiag || retrievalBoolean("diagnostics.request_response_traces", false));
+
+  // Category-based gating
+  if (!alwaysOn) {
+    if (
+      event.startsWith("retrieve.guard") ||
+      event === "retrieve.pre_context" ||
+      event === "retrieve.post_context" ||
+      event === "retrieve.finally" ||
+      event === "retrieve.params" ||
+      event === "retrieve.diag" ||
+      event === "retrieve.ckpt"
+    ) {
+      if (!guardAllowed) return;
+    } else if (event.startsWith("episodic.fallback")) {
+      if (!fallbackAllowed) return;
+    } else if (event === "episodic.request" || event === "episodic.response") {
+      if (!reqRespAllowed) return;
+    } else if (!diagEnabled) {
+      // All other non-essential events require diagnostics to be enabled
+      return;
+    }
+  }
+
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.appendFileSync(

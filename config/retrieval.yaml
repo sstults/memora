@@ -69,3 +69,9 @@ fallbacks:
   semantic_empty_to_episodic: true
   # If still nothing, fall back to project-wide default docs
   project_fallback_docs: true
+
+diagnostics:
+  enabled: false
+  guard_traces: false
+  fallback_traces: false
+  request_response_traces: false
