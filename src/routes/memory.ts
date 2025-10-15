@@ -1124,70 +1124,7 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
     }
   }
   
-  // Fallback 3: if still zero, relax tag filter to improve recall (gated by fallbacks.episodic_relax_tags)
-  const allowFallback3 = retrievalBoolean("fallbacks.episodic_relax_tags", false);
-  if ((!Array.isArray(hits) || hits.length === 0) && allowFallback3) {
-    try {
-      const eoptsNoTags: FilterOptions = {
-        tenant_id: fopts.tenant_id,
-        project_id: fopts.project_id,
-        exclude_tags: fopts.exclude_tags,
-        recent_days: fopts.recent_days
-      };
-      const filter2 = buildBoolFilter(eoptsNoTags);
-      const fallback3Body: any = {
-        size: getPolicy("stages.episodic.top_k", 25),
-        query: {
-          bool: {
-            must: [mmClause],
-            filter: [...(filter2.bool.filter || []), ...(filter2.bool.must || [])],
-            must_not: filter2.bool.must_not || []
-          }
-        }
-      };
-      traceWrite("episodic.fallback3.request", { index: `${EPISODIC_PREFIX}*`, query: fallback3Body.query });
-      resp = await searchWithRetries({ index: `${EPISODIC_PREFIX}*`, body: fallback3Body });
-      hits = resp?.body?.hits?.hits || [];
-      traceWrite("episodic.fallback3.response", {
-        took: resp?.body?.took,
-        total: (resp?.body?.hits as any)?.total ?? null,
-        count: Array.isArray(hits) ? hits.length : 0,
-        sample: (Array.isArray(hits) ? hits : []).slice(0, 3).map((h: any) => ({ id: h?._id, score: h?._score }))
-      });
-    } catch {
-      // best-effort fallback 3
-    }
-  }
   
-  // Fallback 4: if still zero, ignore objective and return most recent docs satisfying tenant/project and tag filters (gated by fallbacks.episodic_recent_docs)
-  const allowFallback4 = retrievalBoolean("fallbacks.episodic_recent_docs", false);
-  if ((!Array.isArray(hits) || hits.length === 0) && allowFallback4) {
-    try {
-      const filter3 = buildBoolFilter(eopts); // include tags if provided
-      const fallback4Body: any = {
-        size: getPolicy("stages.episodic.top_k", 25),
-        query: {
-          bool: {
-            must: [],
-            filter: [...(filter3.bool.filter || []), ...(filter3.bool.must || [])],
-            must_not: filter3.bool.must_not || []
-          }
-        },
-        sort: [{ ts: { order: "desc" } }]
-      };
-      traceWrite("episodic.fallback4.request", { index: `${EPISODIC_PREFIX}*`, query: fallback4Body.query, sort: fallback4Body.sort });
-      resp = await searchWithRetries({ index: `${EPISODIC_PREFIX}*`, body: fallback4Body });
-      hits = resp?.body?.hits?.hits || [];
-      traceWrite("episodic.fallback4.response", {
-        took: resp?.body?.took,
-        total: (resp?.body?.hits as any)?.total ?? null,
-        count: Array.isArray(hits) ? hits.length : 0,
-        sample: (Array.isArray(hits) ? hits : []).slice(0, 3).map((h: any) => ({ id: h?._id, score: h?._score }))
-      });
-    } catch {
-      // best-effort fallback 4
-    }
-  }
   
   return (hits || []).map((hit: any, i: number) => ({
     id: `evt:${hit._id}`,

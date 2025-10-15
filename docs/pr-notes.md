@@ -1,3 +1,61 @@
+# PR Notes — Remove Diagnostic Episodic Fallbacks 3/4 (post-stabilization)
+
+Summary
+- Removed temporary diagnostic episodic fallbacks 3 and 4 from the retrieval path.
+- Removed corresponding config flags from config/retrieval.yaml:
+  - fallbacks.episodic_relax_tags
+  - fallbacks.episodic_recent_docs
+- Deleted unit test that asserted these flags’ default/override behavior.
+- Integration test that asserts absence of fallback3/4 trace markers remains valid (it only checks that such markers do not appear).
+
+Why
+- These were temporary diagnostics to guarantee recall during early investigation (pre-stabilization).
+- With minimal POC stabilized and default diagnostics quieted, these code paths/flags add complexity without ongoing value.
+
+Changes
+1) Retrieval code
+   - File: src/routes/memory.ts
+   - Removed fallback3 (relax tag filter) and fallback4 (recent docs ignoring objective).
+   - Primary path and fallbacks 1/2 retained:
+     - episodic.fallback.request / episodic.fallback.response (simple match) 
+     - episodic.fallback2.request / episodic.fallback2.response (simple_query_string)
+   - No behavior change for successful retrievals; only removes the last-ditch diagnostic branches.
+
+2) Configuration cleanup
+   - File: config/retrieval.yaml
+   - Removed keys:
+     - fallbacks.episodic_relax_tags
+     - fallbacks.episodic_recent_docs
+   - Other fallbacks remain:
+     - fallbacks.semantic_empty_to_episodic
+     - fallbacks.project_fallback_docs
+
+3) Tests
+   - Removed unit test: tests/unit/services/config.fallbacks.spec.ts (covered the removed flags).
+   - Kept integration test: tests/integration/retrieve.fallbacks_disabled.integration.spec.ts 
+     - This test asserts that fallback3/4 trace markers are absent with diagnostics enabled; still true since those markers no longer exist.
+
+Operator Impact
+- No action required. There are no supported flags to enable these diagnostics anymore.
+- Existing YAML/env that attempt to set these keys are ignored (config keys no longer present).
+
+Validation
+- Unit tests: npm run test:unit → 15 files, 77 tests — all passing.
+- Integration (optional; requires OpenSearch via docker): test remains valid as it checks absence of the removed markers.
+
+Files Touched
+- src/routes/memory.ts
+  - Removed fallback3/4 code paths and associated trace logging.
+- config/retrieval.yaml
+  - Removed episodic_relax_tags and episodic_recent_docs flags.
+- tests/unit/services/config.fallbacks.spec.ts
+  - Deleted (obsolete after flag removal).
+
+Commit Message Suggestion
+retrieve: remove diagnostic episodic fallbacks 3/4; drop config flags; tests pass
+
+---
+
 # PR Notes — Diagnostics Gating and Minimal Trace Defaults
 
 Summary
@@ -81,6 +139,3 @@ Testing
 Upgrade/Migration
 - No migration required. Existing environments continue to write minimal markers.
 - For operators expecting previous verbosity, set diagnostics.* = true in YAML or MEMORA_DIAGNOSTICS=1 in env during investigations.
-
-Commit Message Suggestion
-diag: gate trace verbosity via YAML+env; keep minimal markers; docs + troubleshooting
