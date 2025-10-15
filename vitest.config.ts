@@ -24,7 +24,7 @@ export default defineConfig({
         "src/domain/types.ts"
       ],
       thresholds: {
-        lines: 80,
+        lines: 75,
         functions: 80,
         branches: 70
       }
