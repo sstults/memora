@@ -15,7 +15,7 @@ import { z } from "zod";
 
 import { requireContext } from "./context.js";
 import { buildBoolFilter, FilterOptions } from "../domain/filters.js";
-import type { Hit as FusedHit } from "../domain/fusion.js";
+import { fuseAndDiversify, type Hit as FusedHit } from "../domain/fusion.js";
 import {
   Context,
   Event,
@@ -311,34 +311,7 @@ export function registerMemory(server: any) {
       return handleRetrieve({ params: args });
     }
   );
-  server.tool(
-    "memory.promote",
-    "Promote a semantic memory to a broader scope.",
-    {
-      mem_id: z.string().describe("Semantic memory id (mem:<id> or <id>)"),
-      to_scope: z.enum(["this_task", "project", "tenant"]).describe("Target scope")
-    },
-    async (args: any) => {
-      return handlePromote({ params: args });
-    }
-  );
-  // New agent-ergonomic tools
-  server.tool(
-    "memory.write_if_salient",
-    "Write only if at least one salient atom passes threshold.",
-    {
-      content: z.string().describe("Event content text"),
-      role: z.string().optional(),
-      tags: z.array(z.string()).optional(),
-      idempotency_key: z.string().optional(),
-      scope: z.enum(["this_task", "project", "tenant"]).optional(),
-      task_id: z.string().optional(),
-      min_score_override: z.number().optional().describe("Override salience threshold for this call")
-    },
-    async (args: any) => {
-      return handleWriteIfSalient({ params: args });
-    }
-  );
+  // Feature: memory.retrieve_and_pack (off-by-default; tool available on this branch)
   server.tool(
     "memory.retrieve_and_pack",
     "Retrieve snippets and return a packed prompt using config/packing.yaml.",
@@ -362,30 +335,11 @@ export function registerMemory(server: any) {
       return handleRetrieveAndPack({ params: args });
     }
   );
-  server.tool(
-    "memory.autopromote",
-    "Promote top-N semantic memories to a target scope based on sort criteria.",
-    {
-      to_scope: z.enum(["this_task", "project", "tenant"]).describe("Target scope"),
-      limit: z.number().optional().describe("Number of items to promote (default 10)"),
-      sort_by: z.enum(["last_used", "salience"]).optional().describe("Sort criteria"),
-      filters: z.object({
-        context_id: z.string().optional(),
-        scope: z.array(z.string()).optional(),
-        tags: z.array(z.string()).optional(),
-        api_version: z.string().optional(),
-        env: z.string().optional()
-      }).optional()
-    },
-    async (args: any) => {
-      return handleAutoPromote({ params: args });
-    }
-  );
 
   // Diagnostics: confirm tools registered in this process
   try {
     traceWrite("memory.tools_registered", {
-      tools: ["memory.write","memory.retrieve","memory.promote","memory.write_if_salient","memory.retrieve_and_pack","memory.autopromote"]
+      tools: ["memory.write","memory.retrieve"]
     });
   } catch {
     // ignore
@@ -804,17 +758,42 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
   }
   log("stage.episodic", { hits: episodicHits.length, tookMs: Date.now() - tE });
 
-  // Stage B: Semantic (k-NN + filters) — gated by config.stages.semantic.enabled
-  const semanticHits: FusedHit[] = [];
+  // Stage B: Semantic disabled on this branch (gated by config)
   log("stage.semantic", { hits: 0, tookMs: 0 });
 
   // Stage C: Facts (1–2 hop expansion) — gated by config.stages.facts.enabled
-  const factHits: FusedHit[] = [];
-  log("stage.facts", { hits: 0, tookMs: 0 });
+  let factHits: FusedHit[] = [];
+  if (retrievalBoolean("stages.facts.enabled", false)) {
+    const tF = Date.now();
+    factHits = await factsSearch(q2, fopts);
+    log("stage.facts", { hits: factHits.length, tookMs: Date.now() - tF });
+  } else {
+    log("stage.facts", { hits: 0, tookMs: 0 });
+  }
 
   // Fuse + optional rerank
-  let fused: FusedHit[] = episodicHits.slice(0, budget);
-  log("fuse", { episodic: episodicHits.length, semantic: semanticHits.length, facts: factHits.length, fused: fused.length });
+  let fused: FusedHit[];
+  if (retrievalBoolean("stages.facts.enabled", false)) {
+    fused = fuseAndDiversify(
+      episodicHits,
+      [], // semantic disabled by default on this branch
+      factHits,
+      {
+        limit: budget,
+        rrfK: getPolicy("fusion.rrf_k", 60),
+        normalizeScores: retrievalBoolean("fusion.normalize_scores", true),
+        mmr: {
+          enabled: retrievalBoolean("diversity.enabled", false) && !isTemporalQuery(q2.objective),
+          lambda: getPolicy("diversity.lambda", 0.8),
+          minDistance: getPolicy("diversity.min_distance", 0.2),
+          maxPerTag: getPolicy("diversity.max_per_tag", 5)
+        }
+      }
+    );
+  } else {
+    fused = episodicHits.slice(0, budget);
+  }
+  log("fuse", { episodic: episodicHits.length, semantic: 0, facts: factHits.length, fused: fused.length });
 
 
   // Touch last_used for semantic docs we return
@@ -840,22 +819,6 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
 // =========================
 // memory.promote
 // =========================
-async function handlePromote(req: any) {
-  const client = getClient();
-  const { mem_id, to_scope } = req.params as { mem_id: string; to_scope: Scope };
-  if (!mem_id || !to_scope) throw new Error("memory.promote requires mem_id and to_scope.");
-
-  // Normalize to accept either "mem:<id>" or raw "<id>"
-  const id = String(mem_id).replace(/^mem:/, "");
-
-  await withRetries(() => client.update({
-    index: SEMANTIC_INDEX,
-    id,
-    body: { doc: { task_scope: to_scope } }
-  }));
-
-  return { ok: true, mem_id: id, scope: to_scope };
-}
 
 // =====================================================
 // --------- Helpers: search, indexing, policies --------
@@ -1140,7 +1103,76 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
 
 // ---- Semantic k-NN
 
-// ---- Facts (1–2 hop expansion; here we just keyword-match s/p/o)
+ // ---- Facts (1–2 hop expansion; keyword over s/p/o)
+async function factsSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<FusedHit[]> {
+  const size = getPolicy("stages.facts.top_k", 40);
+
+  // Facts docs contain tenant_id, project_id, fact fields (s/p/o); no scope/task/env filters
+  const ffopts: FilterOptions = {
+    tenant_id: fopts.tenant_id,
+    project_id: fopts.project_id
+  } as any;
+
+  const bf = buildBoolFilter(ffopts);
+
+  const body = {
+    size,
+    query: {
+      bool: {
+        must: [
+          {
+            multi_match: {
+              query: q.objective,
+              fields: ["s^1.5", "o^1", "p^0.5"]
+            }
+          }
+        ],
+        filter: bf.bool.filter ?? [],
+        must_not: bf.bool.must_not ?? []
+      }
+    }
+  };
+
+  const resp = await searchWithRetries({ index: FACTS_INDEX, body });
+  const hits: any[] = (resp?.body?.hits?.hits ?? []);
+  return hits.map((hit: any, i: number) => ({
+    id: `fact:${hit._id}`,
+    text: `${hit._source?.s} ${hit._source?.p} ${hit._source?.o}`,
+    score: hit._score ?? 0,
+    rank: i + 1,
+    source: "facts" as const,
+    tags: ["fact"],
+    why: "facts: structured relation",
+    meta: {}
+  }));
+}
+
+ // ---- Retrieve and Pack (packs sections using config/packing.yaml)
+async function handleRetrieveAndPack(req: any) {
+  // Normalize arguments and delegate retrieval to handleRetrieve (context handling inside)
+  (req as any).params = normalizeParamsContainer(req);
+  const rres = await handleRetrieve({ params: req.params });
+
+  const system = String(req.params?.system ?? "");
+  const task_frame = String(req.params?.task_frame ?? "");
+  const tool_state = String(req.params?.tool_state ?? "");
+  const recent_turns = String(req.params?.recent_turns ?? "");
+
+  const retrievedText = rres.snippets
+    .map((s, i) => `[#${i + 1}] (${s.source}; score=${(s.score ?? 0).toFixed(3)}) ${s.text}`)
+    .join("\n");
+
+  const sections = [
+    system ? { name: "system", content: system } : null,
+    task_frame ? { name: "task_frame", content: task_frame } : null,
+    tool_state ? { name: "tool_state", content: tool_state } : null,
+    retrievedText ? { name: "retrieved", content: retrievedText } : null,
+    recent_turns ? { name: "recent_turns", content: recent_turns } : null
+  ].filter(Boolean) as { name: string; content: string }[];
+
+  const packed_prompt = packPrompt(sections);
+  return { snippets: rres.snippets, packed_prompt };
+}
 
 
  // ---- Utilities ----
@@ -1190,130 +1222,18 @@ function isTemporalQuery(q: string | undefined): boolean {
  * Fast salience precheck: if no atom meets threshold, do not persist anything.
  * Optional param: min_score_override to adjust threshold at call time (useful for tests/agents).
  */
-async function handleWriteIfSalient(req: any) {
-  requireContext();
-  const content = String(req.params?.content ?? "");
-  const atoms = atomicSplit(content);
-  const threshold = typeof req.params?.min_score_override === "number"
-    ? Number(req.params.min_score_override)
-    : getPolicy("salience.min_score", 0.6);
-
-  let anySalient = false;
-  for (const a of atoms) {
-    const sal = scoreSalience(a, { tags: req.params?.tags || [] });
-    if (sal >= threshold) {
-      anySalient = true;
-      break;
-    }
-  }
-
-  // Heuristic: treat structured fact-like relations as salient even if score is below threshold
-  // Matches "<subject> (introduced_in|requires|uses) <object>"
-  if (!anySalient) {
-    const relationLike = /([A-Za-z0-9_.]+)\s+(introduced_in|requires|uses)\s+([A-Za-z0-9_.-]+)/i.test(content);
-    if (relationLike) {
-      anySalient = true;
-    }
-  }
-
-  if (!anySalient) {
-    return { ok: true, written: false, reason: "below_threshold" };
-  }
-
-  // Delegate to canonical write
-  const res = await handleWrite(req);
-  return { ...res, written: true };
-}
 
 /**
  * memory.retrieve_and_pack
  * Retrieves snippets and returns a packed prompt using config/packing.yaml.
  * Accepts optional sections: system, task_frame, tool_state, recent_turns (strings).
  */
-async function handleRetrieveAndPack(req: any) {
-  // Normalize MCP tool arguments
-  (req as any).params = normalizeParamsContainer(req);
-  requireContext(); // ensure context set
-  const rres = await handleRetrieve({ params: req.params });
-
-  const system = String(req.params?.system ?? "");
-  const task_frame = String(req.params?.task_frame ?? "");
-  const tool_state = String(req.params?.tool_state ?? "");
-  const recent_turns = String(req.params?.recent_turns ?? "");
-
-  const retrievedText = rres.snippets
-    .map((s, i) => `[#${i + 1}] (${s.source}; score=${(s.score ?? 0).toFixed(3)}) ${s.text}`)
-    .join("\n");
-
-  const sections = [
-    system ? { name: "system", content: system } : null,
-    task_frame ? { name: "task_frame", content: task_frame } : null,
-    tool_state ? { name: "tool_state", content: tool_state } : null,
-    retrievedText ? { name: "retrieved", content: retrievedText } : null,
-    recent_turns ? { name: "recent_turns", content: recent_turns } : null
-  ].filter(Boolean) as { name: string; content: string }[];
-
-  const packed_prompt = packPrompt(sections);
-  return { snippets: rres.snippets, packed_prompt };
-}
 
 /**
  * memory.autopromote
  * Promotes top-N semantic memories to a target scope based on sort criteria.
  * Request: { to_scope, limit?, sort_by? = "last_used", filters? }
  */
-async function handleAutoPromote(req: any) {
-  // Normalize MCP tool arguments
-  (req as any).params = normalizeParamsContainer(req);
-  const client = getClient();
-  const to_scope = req.params?.to_scope as Scope;
-  if (!to_scope) throw new Error("memory.autopromote requires to_scope.");
-
-  const active = requireContext();
-  const limit = Math.max(1, Math.min(100, Number(req.params?.limit ?? 10)));
-  const sort_by = String(req.params?.sort_by ?? "last_used"); // "last_used" | "salience"
-
-  // Build filter for current tenant/project (+ optional filters)
-  const fopts: FilterOptions = {
-    tenant_id: active.tenant_id,
-    project_id: active.project_id,
-    context_id: req.params?.filters?.context_id ?? active.context_id,
-    scopes: req.params?.filters?.scope ?? ["this_task", "project"],
-    tags: req.params?.filters?.tags,
-    api_version: req.params?.filters?.api_version ?? active.api_version,
-    env: req.params?.filters?.env ?? active.env,
-    exclude_tags: getPolicyArray("filters.exclude_tags", ["secret", "sensitive"])
-  } as any;
-
-  const bf = buildBoolFilter(fopts);
-  // Build sort array explicitly to satisfy OpenSearch client's SortOptions[]
-  const sort: any[] = [];
-  if (sort_by === "salience") {
-    sort.push({ salience: { order: "desc" } }, { last_used: { order: "desc" } });
-  } else {
-    sort.push({ last_used: { order: "desc" } }, { salience: { order: "desc" } });
-  }
-
-  const body = {
-    size: limit,
-    query: { bool: { must: bf.bool.must ?? [], filter: bf.bool.filter ?? [], must_not: bf.bool.must_not ?? [] } },
-    sort
-  };
-
-  const resp = await searchWithRetries({ index: SEMANTIC_INDEX, body });
-  const hits: any[] = (resp.body?.hits?.hits ?? []);
-  const ids = hits.map(h => String(h._id));
-
-  for (const id of ids) {
-    await withRetries(() => client.update({
-      index: SEMANTIC_INDEX,
-      id,
-      body: { doc: { task_scope: to_scope } }
-    }));
-  }
-
-  return { ok: true, promoted: ids, scope: to_scope };
-}
 
 // Replace with your fact extraction (regex/LLM). Here we demo a trivial pattern.
 function extractFacts(text: string, ctx: Context): Fact[] {
