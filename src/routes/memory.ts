@@ -8,7 +8,6 @@ import { getClient, bulkSafe, indexWithRetries, searchWithRetries, withRetries }
 import { embed } from "../services/embedder.js";
 import { scoreSalience, atomicSplit, summarizeIfLong, redact } from "../services/salience.js";
 import { policyNumber, policyArray, retrievalNumber, retrievalArray, retrievalBoolean, retrievalString } from "../services/config.js";
-import { packPrompt } from "../services/packer.js";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
@@ -16,6 +15,7 @@ import { z } from "zod";
 import { requireContext } from "./context.js";
 import { buildBoolFilter, FilterOptions } from "../domain/filters.js";
 import type { Hit as FusedHit } from "../domain/fusion.js";
+import { crossRerank } from "../services/rerank.js";
 import {
   Context,
   Event,
@@ -311,81 +311,10 @@ export function registerMemory(server: any) {
       return handleRetrieve({ params: args });
     }
   );
-  server.tool(
-    "memory.promote",
-    "Promote a semantic memory to a broader scope.",
-    {
-      mem_id: z.string().describe("Semantic memory id (mem:<id> or <id>)"),
-      to_scope: z.enum(["this_task", "project", "tenant"]).describe("Target scope")
-    },
-    async (args: any) => {
-      return handlePromote({ params: args });
-    }
-  );
-  // New agent-ergonomic tools
-  server.tool(
-    "memory.write_if_salient",
-    "Write only if at least one salient atom passes threshold.",
-    {
-      content: z.string().describe("Event content text"),
-      role: z.string().optional(),
-      tags: z.array(z.string()).optional(),
-      idempotency_key: z.string().optional(),
-      scope: z.enum(["this_task", "project", "tenant"]).optional(),
-      task_id: z.string().optional(),
-      min_score_override: z.number().optional().describe("Override salience threshold for this call")
-    },
-    async (args: any) => {
-      return handleWriteIfSalient({ params: args });
-    }
-  );
-  server.tool(
-    "memory.retrieve_and_pack",
-    "Retrieve snippets and return a packed prompt using config/packing.yaml.",
-    {
-      objective: z.string().describe("Natural-language query objective"),
-      budget: z.number().optional().describe("Max number of items to return (top-K budget)"),
-      system: z.string().optional(),
-      task_frame: z.string().optional(),
-      tool_state: z.string().optional(),
-      recent_turns: z.string().optional(),
-      filters: z.object({
-        scope: z.array(z.string()).optional(),
-        tags: z.array(z.string()).optional(),
-        api_version: z.string().optional(),
-        env: z.string().optional()
-      }).optional(),
-      context_id: z.string().optional(),
-      task_id: z.string().optional()
-    },
-    async (args: any) => {
-      return handleRetrieveAndPack({ params: args });
-    }
-  );
-  server.tool(
-    "memory.autopromote",
-    "Promote top-N semantic memories to a target scope based on sort criteria.",
-    {
-      to_scope: z.enum(["this_task", "project", "tenant"]).describe("Target scope"),
-      limit: z.number().optional().describe("Number of items to promote (default 10)"),
-      sort_by: z.enum(["last_used", "salience"]).optional().describe("Sort criteria"),
-      filters: z.object({
-        context_id: z.string().optional(),
-        scope: z.array(z.string()).optional(),
-        tags: z.array(z.string()).optional(),
-        api_version: z.string().optional(),
-        env: z.string().optional()
-      }).optional()
-    },
-    async (args: any) => {
-      return handleAutoPromote({ params: args });
-    }
-  );
-
   // Diagnostics: confirm tools registered in this process
   try {
     traceWrite("memory.tools_registered", {
-      tools: ["memory.write","memory.retrieve","memory.promote","memory.write_if_salient","memory.retrieve_and_pack","memory.autopromote"]
+      tools: ["memory.write","memory.retrieve"]
     });
   } catch {
     // ignore
@@ -814,6 +743,17 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
 
   // Fuse + optional rerank
   let fused: FusedHit[] = episodicHits.slice(0, budget);
+
+  // Optional rerank stage (gated by env MEMORA_RERANK_ENABLED or retrieval.yaml: rerank.enabled)
+  try {
+    const maxC = retrievalNumber("rerank.max_candidates", 32);
+    const budgetMs = retrievalNumber("rerank.budget_ms", 1200);
+    const model = retrievalString("rerank.model", "cross-encoder-mini");
+    fused = await crossRerank(String(q2.objective ?? ""), fused, { maxCandidates: maxC, budgetMs, model });
+  } catch (e) {
+    log("rerank.skip_or_error", { err: String(e) });
+  }
+
   log("fuse", { episodic: episodicHits.length, semantic: semanticHits.length, facts: factHits.length, fused: fused.length });
 
 
@@ -840,22 +780,6 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
 // =========================
 // memory.promote
 // =========================
-async function handlePromote(req: any) {
-  const client = getClient();
-  const { mem_id, to_scope } = req.params as { mem_id: string; to_scope: Scope };
-  if (!mem_id || !to_scope) throw new Error("memory.promote requires mem_id and to_scope.");
-
-  // Normalize to accept either "mem:<id>" or raw "<id>"
-  const id = String(mem_id).replace(/^mem:/, "");
-
-  await withRetries(() => client.update({
-    index: SEMANTIC_INDEX,
-    id,
-    body: { doc: { task_scope: to_scope } }
-  }));
-
-  return { ok: true, mem_id: id, scope: to_scope };
-}
 
 // =====================================================
 // --------- Helpers: search, indexing, policies --------
@@ -1190,130 +1114,18 @@ function isTemporalQuery(q: string | undefined): boolean {
  * Fast salience precheck: if no atom meets threshold, do not persist anything.
  * Optional param: min_score_override to adjust threshold at call time (useful for tests/agents).
  */
-async function handleWriteIfSalient(req: any) {
-  requireContext();
-  const content = String(req.params?.content ?? "");
-  const atoms = atomicSplit(content);
-  const threshold = typeof req.params?.min_score_override === "number"
-    ? Number(req.params.min_score_override)
-    : getPolicy("salience.min_score", 0.6);
-
-  let anySalient = false;
-  for (const a of atoms) {
-    const sal = scoreSalience(a, { tags: req.params?.tags || [] });
-    if (sal >= threshold) {
-      anySalient = true;
-      break;
-    }
-  }
-
-  // Heuristic: treat structured fact-like relations as salient even if score is below threshold
-  // Matches "<subject> (introduced_in|requires|uses) <object>"
-  if (!anySalient) {
-    const relationLike = /([A-Za-z0-9_.]+)\s+(introduced_in|requires|uses)\s+([A-Za-z0-9_.-]+)/i.test(content);
-    if (relationLike) {
-      anySalient = true;
-    }
-  }
-
-  if (!anySalient) {
-    return { ok: true, written: false, reason: "below_threshold" };
-  }
-
-  // Delegate to canonical write
-  const res = await handleWrite(req);
-  return { ...res, written: true };
-}
 
 /**
  * memory.retrieve_and_pack
  * Retrieves snippets and returns a packed prompt using config/packing.yaml.
  * Accepts optional sections: system, task_frame, tool_state, recent_turns (strings).
  */
-async function handleRetrieveAndPack(req: any) {
-  // Normalize MCP tool arguments
-  (req as any).params = normalizeParamsContainer(req);
-  requireContext(); // ensure context set
-  const rres = await handleRetrieve({ params: req.params });
-
-  const system = String(req.params?.system ?? "");
-  const task_frame = String(req.params?.task_frame ?? "");
-  const tool_state = String(req.params?.tool_state ?? "");
-  const recent_turns = String(req.params?.recent_turns ?? "");
-
-  const retrievedText = rres.snippets
-    .map((s, i) => `[#${i + 1}] (${s.source}; score=${(s.score ?? 0).toFixed(3)}) ${s.text}`)
-    .join("\n");
-
-  const sections = [
-    system ? { name: "system", content: system } : null,
-    task_frame ? { name: "task_frame", content: task_frame } : null,
-    tool_state ? { name: "tool_state", content: tool_state } : null,
-    retrievedText ? { name: "retrieved", content: retrievedText } : null,
-    recent_turns ? { name: "recent_turns", content: recent_turns } : null
-  ].filter(Boolean) as { name: string; content: string }[];
-
-  const packed_prompt = packPrompt(sections);
-  return { snippets: rres.snippets, packed_prompt };
-}
 
 /**
  * memory.autopromote
  * Promotes top-N semantic memories to a target scope based on sort criteria.
  * Request: { to_scope, limit?, sort_by? = "last_used", filters? }
  */
-async function handleAutoPromote(req: any) {
-  // Normalize MCP tool arguments
-  (req as any).params = normalizeParamsContainer(req);
-  const client = getClient();
-  const to_scope = req.params?.to_scope as Scope;
-  if (!to_scope) throw new Error("memory.autopromote requires to_scope.");
-
-  const active = requireContext();
-  const limit = Math.max(1, Math.min(100, Number(req.params?.limit ?? 10)));
-  const sort_by = String(req.params?.sort_by ?? "last_used"); // "last_used" | "salience"
-
-  // Build filter for current tenant/project (+ optional filters)
-  const fopts: FilterOptions = {
-    tenant_id: active.tenant_id,
-    project_id: active.project_id,
-    context_id: req.params?.filters?.context_id ?? active.context_id,
-    scopes: req.params?.filters?.scope ?? ["this_task", "project"],
-    tags: req.params?.filters?.tags,
-    api_version: req.params?.filters?.api_version ?? active.api_version,
-    env: req.params?.filters?.env ?? active.env,
-    exclude_tags: getPolicyArray("filters.exclude_tags", ["secret", "sensitive"])
-  } as any;
-
-  const bf = buildBoolFilter(fopts);
-  // Build sort array explicitly to satisfy OpenSearch client's SortOptions[]
-  const sort: any[] = [];
-  if (sort_by === "salience") {
-    sort.push({ salience: { order: "desc" } }, { last_used: { order: "desc" } });
-  } else {
-    sort.push({ last_used: { order: "desc" } }, { salience: { order: "desc" } });
-  }
-
-  const body = {
-    size: limit,
-    query: { bool: { must: bf.bool.must ?? [], filter: bf.bool.filter ?? [], must_not: bf.bool.must_not ?? [] } },
-    sort
-  };
-
-  const resp = await searchWithRetries({ index: SEMANTIC_INDEX, body });
-  const hits: any[] = (resp.body?.hits?.hits ?? []);
-  const ids = hits.map(h => String(h._id));
-
-  for (const id of ids) {
-    await withRetries(() => client.update({
-      index: SEMANTIC_INDEX,
-      id,
-      body: { doc: { task_scope: to_scope } }
-    }));
-  }
-
-  return { ok: true, promoted: ids, scope: to_scope };
-}
 
 // Replace with your fact extraction (regex/LLM). Here we demo a trivial pattern.
 function extractFacts(text: string, ctx: Context): Fact[] {

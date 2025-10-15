@@ -139,3 +139,71 @@ Testing
 Upgrade/Migration
 - No migration required. Existing environments continue to write minimal markers.
 - For operators expecting previous verbosity, set diagnostics.* = true in YAML or MEMORA_DIAGNOSTICS=1 in env during investigations.
+
+---
+
+# PR Notes — Rerank Stage (feature/rerank-osml)
+
+Summary
+- Wired an optional rerank stage into memory.retrieve on feature/rerank-osml.
+- The stage is fully gated and disabled by default; no changes to Minimal POC defaults on main.
+- Supports multiple backends in priority order:
+  1) OpenSearch ML cross-encoder (if OPENSEARCH_ML_RERANK_MODEL_ID is set)
+  2) Remote HTTP endpoint (RERANK_ENDPOINT, optional RERANK_API_KEY)
+  3) Local deterministic fallback (lexical Jaccard + optional cosine blend if embeddings are present)
+
+Why
+- Reranking improves the ordering of retrieved candidates when multiple sources (episodic/semantic/facts) contribute or when lexical top-k is noisy.
+- Keeping it off-by-default preserves Minimal POC invariants while allowing targeted evaluation in the feature branch.
+
+Changes
+1) Retrieval code
+   - File: src/routes/memory.ts
+   - Added import: { crossRerank } from "../services/rerank.js"
+   - After initial fused list, apply rerank when enabled:
+     - Reads settings from retrieval.yaml:
+       - rerank.enabled (bool, default false)
+       - rerank.max_candidates (default 32)
+       - rerank.budget_ms (default 1200)
+       - rerank.model (default "cross-encoder-mini")
+     - Env override: MEMORA_RERANK_ENABLED=true forces enable regardless of YAML.
+     - OS-ML path used when OPENSEARCH_ML_RERANK_MODEL_ID is set; otherwise RERANK_ENDPOINT is used; otherwise local fallback.
+
+2) Configuration (no default change on main)
+   - retrieval.yaml already contains rerank.* keys with defaults:
+     - rerank.enabled: false (Minimal POC)
+     - rerank.max_candidates: 32
+     - rerank.budget_ms: 1200
+     - rerank.model: "cross-encoder-mini"
+
+3) Tests
+   - Unit tests pass on the feature branch:
+     - npm run test:unit → 15 files, 77 tests — all passing.
+
+Operator Impact
+- Default behavior unchanged: rerank disabled.
+- To enable temporarily for experiments:
+  - Env: export MEMORA_RERANK_ENABLED=true
+  - Or YAML (persistent):
+    rerank:
+      enabled: true
+      max_candidates: 32
+      budget_ms: 1200
+      model: cross-encoder-mini
+  - For OpenSearch ML:
+    export OPENSEARCH_ML_RERANK_MODEL_ID=<model-id>
+  - For remote rerank:
+    export RERANK_ENDPOINT=http://localhost:8081/rerank
+    export RERANK_API_KEY=<optional>
+
+Validation
+- Unit tests: npm run test:unit → 15 files, 77 tests — all passing.
+- Optional manual smoke (with diagnostics if needed) via scripts/dev/run_smokes_and_tail.sh.
+
+Files Touched
+- src/routes/memory.ts
+  - Import and application of crossRerank with config/env gating.
+- No changes to defaults in config/retrieval.yaml on main.
+
+Commit Message Suggestion
+feat(rerank): wire rerank stage in memory.retrieve gated by config/env; unit tests pass
