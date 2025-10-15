@@ -15,6 +15,7 @@ import { z } from "zod";
 import { requireContext } from "./context.js";
 import { buildBoolFilter, FilterOptions } from "../domain/filters.js";
 import type { Hit as FusedHit } from "../domain/fusion.js";
+import { crossRerank } from "../services/rerank.js";
 import {
   Context,
   Event,
@@ -742,6 +743,17 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
 
   // Fuse + optional rerank
   let fused: FusedHit[] = episodicHits.slice(0, budget);
+
+  // Optional rerank stage (gated by env MEMORA_RERANK_ENABLED or retrieval.yaml: rerank.enabled)
+  try {
+    const maxC = retrievalNumber("rerank.max_candidates", 32);
+    const budgetMs = retrievalNumber("rerank.budget_ms", 1200);
+    const model = retrievalString("rerank.model", "cross-encoder-mini");
+    fused = await crossRerank(String(q2.objective ?? ""), fused, { maxCandidates: maxC, budgetMs, model });
+  } catch (e) {
+    log("rerank.skip_or_error", { err: String(e) });
+  }
+
   log("fuse", { episodic: episodicHits.length, semantic: semanticHits.length, facts: factHits.length, fused: fused.length });
 
 
