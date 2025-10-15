@@ -20,6 +20,8 @@
     "dev:trace:episodic": "bash scripts/dev/tail_episodic_index.sh",
     "dev:trace:episodic:follow": "FOLLOW=1 bash scripts/dev/tail_episodic_index.sh",
     "dev:trace:filter": "bash scripts/dev/filter_trace.sh",
+    "dev:trace:stats": "bash scripts/dev/trace_stats.sh",
+    "dev:trace:stats:sample": "SAMPLE=1 bash scripts/dev/trace_stats.sh",
     "smoke:write": "node --import ./scripts/register-ts-node.mjs scripts/dev/mcp_write_smoke.ts",
     "smoke:retrieve": "node --import ./scripts/register-ts-node.mjs scripts/dev/mcp_retrieve_smoke.ts"
   },
