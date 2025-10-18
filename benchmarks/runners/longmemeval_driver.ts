@@ -25,6 +25,12 @@ interface Turn {
   role?: string;
   content?: string;
   text?: string;
+  ts?: string;
+  timestamp?: string;
+  time?: string;
+  date?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 interface Sample {
@@ -178,6 +184,141 @@ function buildRecentTurnsText(sessions: Turn[][]): string {
   return texts.join("\n---TURN---\n");
 }
 
+function dedupeStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  for (const v of values) {
+    const s = (v ?? "").toString().trim();
+    if (!s) continue;
+    seen.add(s);
+  }
+  return Array.from(seen);
+}
+
+function asStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return dedupeStrings(value.map((v) => (v ?? "").toString()));
+  }
+  if (typeof value === "string") {
+    return dedupeStrings([(value ?? "").toString()]);
+  }
+  return [];
+}
+
+function normalizeIsoTimestamp(value?: string): string | undefined {
+  if (!value) return undefined;
+  try {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return undefined;
+    return d.toISOString();
+  } catch {
+    return undefined;
+  }
+}
+
+function extractCandidateTimestamp(turn: Turn): string | undefined {
+  const candidates = [turn.ts, turn.timestamp, turn.time, turn.date, turn.created_at, turn.updated_at];
+  for (const candidate of candidates) {
+    const iso = normalizeIsoTimestamp(candidate);
+    if (iso) return iso;
+  }
+  return undefined;
+}
+
+function collectProvidedFacts(turn: Turn): string[] {
+  const direct = asStringArray((turn as any)?.facts);
+  const meta = asStringArray((turn as any)?.metadata?.facts);
+  return dedupeStrings([...direct, ...meta]);
+}
+
+function extractRoundFacts(text: string): string[] {
+  const s = text ?? "";
+  const facts = new Set<string>();
+
+  const patterns: RegExp[] = [
+    /\bI\s+(?:really\s+)?(?:like|love|enjoy)\s+([^.!?\n]{3,80})/gi,
+    /\bI\s+(?:really\s+)?(?:dislike|hate)\s+([^.!?\n]{3,80})/gi,
+    /\bI\s+(?:am|\'m)\s+(?:from|in|living in|based in|located in|live in)\s+([^.!?\n]{3,80})/gi,
+    /\bI\s+(?:work|worked)\s+(?:at|for)\s+([^.!?\n]{3,80})/gi,
+    /\bI\s+(?:study|studied)\s+(?:at|in)\s+([^.!?\n]{3,80})/gi,
+    /\bMy\s+favorite\s+([^.!?\n]{2,40})\s+(?:is|are)\s+([^.!?\n]{2,80})/gi,
+    /\bI\s+(?:prefer)\s+([^.!?\n]{3,80})/gi,
+    /\bI\s+(?:was|were)\s+born\s+(?:in|on)\s+([^.!?\n]{3,80})/gi,
+    /\bI\s+(?:have|own)\s+([^.!?\n]{3,80})/gi
+  ];
+
+  for (const pattern of patterns) {
+    const matches = s.matchAll(pattern);
+    for (const match of matches) {
+      const [, subject, object] = match;
+      if (object) {
+        facts.add(`${match[0]}`.replace(/\s+/g, " ").trim());
+      } else if (subject) {
+        facts.add(`${match[0]}`.replace(/\s+/g, " ").trim());
+      }
+    }
+  }
+
+  return Array.from(facts);
+}
+
+interface RoundChunk {
+  text: string;
+  facts: string[];
+  roundIndex: number;
+  roundTs?: string;
+  roundDate?: string;
+}
+
+function sessionToRounds(session: Turn[]): RoundChunk[] {
+  const rounds: RoundChunk[] = [];
+  let buffer: { formatted: string; turn: Turn; ts?: string; providedFacts: string[] }[] = [];
+  let roundIndex = 0;
+
+  const flush = () => {
+    if (buffer.length === 0) return;
+    const joined = buffer.map((b) => b.formatted).join("\n").trim();
+    if (!joined) {
+      buffer = [];
+      return;
+    }
+    const heuristicFacts = extractRoundFacts(joined);
+    const providedFacts = buffer.flatMap((b) => b.providedFacts);
+    const tsCandidate = buffer.find((b) => b.ts)?.ts;
+    const isoTs = tsCandidate ? normalizeIsoTimestamp(tsCandidate) : undefined;
+    const roundDate = isoTs ? isoTs.slice(0, 10) : undefined;
+    rounds.push({
+      text: joined,
+      facts: dedupeStrings([...providedFacts, ...heuristicFacts]),
+      roundIndex: roundIndex++,
+      roundTs: isoTs,
+      roundDate
+    });
+    buffer = [];
+  };
+
+  for (const turn of session) {
+    const rawText = (turn?.content ?? turn?.text ?? "").toString().trim();
+    if (!rawText) continue;
+    const role = (turn?.role ?? "").toString().trim().toLowerCase();
+    if (role === "user" && buffer.length > 0) {
+      flush();
+    }
+    const roleLabel = role ? role.toUpperCase() : "TURN";
+    buffer.push({
+      formatted: `${roleLabel}: ${rawText}`,
+      turn,
+      ts: extractCandidateTimestamp(turn),
+      providedFacts: collectProvidedFacts(turn)
+    });
+    if (role === "assistant" || role === "tool") {
+      flush();
+    }
+  }
+
+  flush();
+  return rounds;
+}
+
 // Simple vector ops for baseline B
 type Vec = number[];
 
@@ -291,15 +432,31 @@ async function replaySessionsToMemora(
   let attempted = 0;
   let written = 0;
   for (const [sIdx, session] of sessions.entries()) {
-    for (const [tIdx, turn] of session.entries()) {
-      const text = (turn.content ?? turn.text ?? "").toString();
+    const rounds = sessionToRounds(session);
+    for (const round of rounds) {
+      const text = round.text;
       if (!text || !text.trim()) continue;
       attempted++;
+      const roundKey = `${qid}::${sIdx}::${round.roundIndex}`;
       try {
         const common = {
-          tags: ["bench", "longmemeval", `seed:${seed}`, `variant:${variant}`, `qid:${qid}`, `session:${sIdx}`, `turn:${tIdx}`],
+          tags: [
+            "bench",
+            "longmemeval",
+            `seed:${seed}`,
+            `variant:${variant}`,
+            `qid:${qid}`,
+            `session:${sIdx}`,
+            `round:${round.roundIndex}`
+          ],
           scope: "this_task" as const,
-          task_id: `longmemeval-${seed}`
+          task_id: `longmemeval-${seed}`,
+          idempotency_key: roundKey,
+          round_id: roundKey,
+          round_index: round.roundIndex,
+          round_ts: round.roundTs,
+          round_date: round.roundDate,
+          facts_text: round.facts
         };
         if (mode === "write") {
           await adapter.write({
