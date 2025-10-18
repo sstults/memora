@@ -1026,10 +1026,10 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
   };
 
   // Episodic docs do not include env/api_version or scope; tailor filters accordingly
+  // context_id is not used for episodic filtering (episodic memories are task-scoped, not context-scoped)
   const eopts: FilterOptions = {
     tenant_id: fopts.tenant_id,
     project_id: fopts.project_id,
-    context_id: fopts.context_id,
     task_id: fopts.task_id,
     tags: fopts.tags,
     exclude_tags: fopts.exclude_tags,
