@@ -18,6 +18,11 @@ export interface WriteItem {
   idempotency_key?: string;
   scope?: Scope;
   task_id?: string;
+  round_id?: string;
+  round_index?: number;
+  round_ts?: string;
+  round_date?: string;
+  facts_text?: string[];
 }
 
 export interface SearchFilters {
@@ -63,6 +68,11 @@ export class MemoryAdapter {
       idempotency_key: item.idempotency_key,
       scope: item.scope,
       task_id: item.task_id,
+      round_id: item.round_id,
+      round_index: item.round_index,
+      round_ts: item.round_ts,
+      round_date: item.round_date,
+      facts_text: item.facts_text,
       ...(ctx ? {
         tenant_id: ctx.tenant_id,
         project_id: ctx.project_id,
@@ -108,6 +118,11 @@ export class MemoryAdapter {
       idempotency_key: item.idempotency_key,
       scope: item.scope,
       task_id: item.task_id,
+      round_id: item.round_id,
+      round_index: item.round_index,
+      round_ts: item.round_ts,
+      round_date: item.round_date,
+      facts_text: item.facts_text,
       min_score_override,
       ...(ctx ? {
         tenant_id: ctx.tenant_id,

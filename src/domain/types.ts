@@ -21,6 +21,11 @@ export interface Event {
   tags?: string[];
   artifacts?: string[];
   hash?: string;
+  round_id?: string;
+  round_index?: number;
+  round_ts?: string;
+  round_date?: string;
+  facts_text?: string[];
   context: Context;
 }
 
