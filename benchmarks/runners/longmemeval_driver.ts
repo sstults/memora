@@ -55,7 +55,7 @@ function parseArgs(argv: string[]) {
   let variant: Variant = "C";
   let seed = 42;
   let qids = "";
-  let replayMode: "write" | "salient" = "salient";
+  let replayMode: "write" | "salient" = "write";
   let budget = 20;
   let scopeProject = 1;
 
