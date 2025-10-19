@@ -9,6 +9,7 @@ import { embed } from "../services/embedder.js";
 import { scoreSalience, atomicSplit, summarizeIfLong, redact } from "../services/salience.js";
 import { policyNumber, policyArray, retrievalNumber, retrievalArray, retrievalBoolean, retrievalString } from "../services/config.js";
 import { packPrompt } from "../services/packer.js";
+import { extractEntities } from "../services/entity-extraction.js";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
@@ -280,6 +281,11 @@ export function registerMemory(server: any) {
       artifacts: z.array(z.string()).optional().describe("Optional artifact identifiers"),
       hash: z.string().optional().describe("Optional hash for idempotency"),
       ts: z.string().optional().describe("ISO timestamp override"),
+      round_id: z.string().optional().describe("Optional round identifier for aggregated turns"),
+      round_index: z.number().optional().describe("0-based round index within the source session"),
+      round_ts: z.string().optional().describe("ISO timestamp anchor for the round"),
+      round_date: z.string().optional().describe("ISO date (YYYY-MM-DD) anchor for the round"),
+      facts_text: z.array(z.string()).optional().describe("Precomputed fact strings to augment lexical keys"),
       // Optional context override when no active context is set in-process
       tenant_id: z.string().optional().describe("Optional: provide when no active context is set"),
       project_id: z.string().optional().describe("Optional: provide when no active context is set"),
@@ -333,6 +339,11 @@ export function registerMemory(server: any) {
       idempotency_key: z.string().optional(),
       scope: z.enum(["this_task", "project", "tenant"]).optional(),
       task_id: z.string().optional(),
+      round_id: z.string().optional(),
+      round_index: z.number().optional(),
+      round_ts: z.string().optional(),
+      round_date: z.string().optional(),
+      facts_text: z.array(z.string()).optional(),
       min_score_override: z.number().optional().describe("Override salience threshold for this call")
     },
     async (args: any) => {
@@ -471,14 +482,49 @@ async function handleWrite(req: any) {
 
   // Assemble event from params + context
   const nowIso = new Date().toISOString();
+  const ts = coerceIsoDateTime(req.params?.ts) ?? nowIso;
+  const roundIndexRaw = req.params?.round_index;
+  const roundIndex = typeof roundIndexRaw === "number"
+    ? roundIndexRaw
+    : roundIndexRaw !== undefined
+    ? Number(roundIndexRaw)
+    : undefined;
+  const roundTs = coerceIsoDateTime(req.params?.round_ts) ?? ts;
+  const roundDate = coerceIsoDate(req.params?.round_date) ?? (roundTs ? roundTs.slice(0, 10) : ts.slice(0, 10));
+  const factsText = Array.isArray(req.params?.facts_text)
+    ? dedupeStrings(req.params.facts_text)
+    : [];
+
+  // Extract entities from content for improved lexical search
+  const content = redact(String(req.params?.content ?? ""));
+  const entities = extractEntities(content);
+
+  // DEBUG: Log entity extraction for verification
+  if (entities.dates.length > 0 || entities.numbers.length > 0 || entities.entities.length > 0) {
+    console.error("[ENTITY_EXTRACTION]", {
+      content_preview: content.substring(0, 100),
+      dates: entities.dates,
+      numbers: entities.numbers,
+      entities: entities.entities
+    });
+  }
+
   const event: Event = {
     event_id: uuidv4(),
-    ts: req.params?.ts || nowIso,
+    ts,
     role: req.params?.role || "tool",
-    content: redact(String(req.params?.content ?? "")),
+    content,
     tags: req.params?.tags || [],
     artifacts: req.params?.artifacts || [],
     hash: req.params?.hash,
+    round_id: req.params?.round_id ? String(req.params.round_id) : undefined,
+    round_index: Number.isFinite(roundIndex) ? roundIndex : undefined,
+    round_ts: roundTs,
+    round_date: roundDate,
+    facts_text: factsText,
+    extracted_dates: entities.dates.length > 0 ? entities.dates : undefined,
+    extracted_numbers: entities.numbers.length > 0 ? entities.numbers : undefined,
+    extracted_entities: entities.entities.length > 0 ? entities.entities : undefined,
     context: {
       tenant_id: ctx.tenant_id,
       project_id: ctx.project_id,
@@ -873,11 +919,20 @@ function flattenEventForIndex(e: Event) {
     task_id: e.context.task_id,
     event_id: e.event_id,
     ts: e.ts,
+    round_id: e.round_id || null,
+    round_index: typeof e.round_index === "number" ? e.round_index : null,
+    round_ts: e.round_ts || e.ts,
+    round_date: e.round_date || (e.round_ts || e.ts)?.slice(0, 10),
     role: e.role,
     content: e.content,
+    facts_text: Array.isArray(e.facts_text) ? e.facts_text : [],
     tags: e.tags || [],
     artifacts: e.artifacts || [],
-    hash: e.hash || null
+    hash: e.hash || null,
+    // Entity extraction fields for improved lexical search
+    extracted_dates: e.extracted_dates || null,
+    extracted_numbers: e.extracted_numbers || null,
+    extracted_entities: e.extracted_entities || null
   };
 }
 
@@ -914,6 +969,40 @@ function flattenFactForIndex(f: Fact) {
   };
 }
 
+function dedupeStrings(values: any[]): string[] {
+  const seen = new Set<string>();
+  if (!Array.isArray(values)) return [];
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    const s = typeof value === "string" ? value : String(value);
+    const trimmed = s.trim();
+    if (trimmed) {
+      seen.add(trimmed);
+    }
+  }
+  return Array.from(seen);
+}
+
+function coerceIsoDateTime(value: any): string | null {
+  if (!value) return null;
+  try {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString();
+  } catch {
+    return null;
+  }
+}
+
+function coerceIsoDate(value: any): string | null {
+  if (!value) return null;
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    return value.trim();
+  }
+  const iso = coerceIsoDateTime(value);
+  return iso ? iso.slice(0, 10) : null;
+}
+
 // ---- Episodic BM25
 async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<FusedHit[]> {
   // Diagnostic entry trace to verify function execution
@@ -929,19 +1018,27 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
     // ignore
   }
   // Build lexical multi_match with optional shingles/keyword subfields and guardrails
+  const objective = String(q.objective ?? "");
   const useShingles = retrievalBoolean("lexical.use_shingles", true);
   const fields = [
     "content^3",
     ...(useShingles ? ["content.shingles^1.2"] : []),
+    "facts_text^2",
+    ...(useShingles ? ["facts_text.shingles^1.1"] : []),
     "tags^2",
     "artifacts^1",
-    "content.raw^0.5"
+    "content.raw^0.5",
+    // Extracted entity fields for improved recall
+    "extracted_entities^2.5",    // Boost proper nouns (names, places, products)
+    "extracted_dates^2.5",        // Boost date references
+    "extracted_numbers^2"         // Boost numbers with context
   ];
   const mmType = retrievalString("lexical.multi_match_type", "best_fields");
   const tieBreaker = retrievalNumber("lexical.tie_breaker", 0.3);
   const msmPct = retrievalNumber("lexical.min_should_match_pct", 60);
-  const isTemporal = isTemporalQuery(String(q.objective ?? ""));
-  const msm = isTemporal ? null : computedMinShouldMatch(String(q.objective ?? ""), msmPct);
+  const temporalRange = extractTemporalRange(objective);
+  const isTemporal = isTemporalQuery(objective) || !!temporalRange;
+  const msm = isTemporal ? null : computedMinShouldMatch(objective, msmPct);
 
   const mmClause: any = {
     multi_match: {
@@ -954,35 +1051,109 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
     }
   };
 
-  // Episodic docs do not include env/api_version or scope; tailor filters accordingly
+  // Extract entities from query for targeted matching
+  const queryEntities = extractEntities(objective);
+
+  // Add phrase match boosting for exact matches (helps with proper nouns and dates)
+  const phraseBoostClauses: any[] = [];
+  if (queryEntities.entities.length > 0) {
+    for (const entity of queryEntities.entities) {
+      phraseBoostClauses.push({
+        match_phrase: {
+          content: {
+            query: entity,
+            boost: 3.0
+          }
+        }
+      });
+      phraseBoostClauses.push({
+        match_phrase: {
+          extracted_entities: {
+            query: entity,
+            boost: 4.0
+          }
+        }
+      });
+    }
+  }
+  if (queryEntities.dates.length > 0) {
+    for (const date of queryEntities.dates) {
+      phraseBoostClauses.push({
+        match_phrase: {
+          content: {
+            query: date,
+            boost: 2.5
+          }
+        }
+      });
+      phraseBoostClauses.push({
+        match_phrase: {
+          extracted_dates: {
+            query: date,
+            boost: 4.0
+          }
+        }
+      });
+    }
+  }
+  if (queryEntities.numbers.length > 0) {
+    for (const number of queryEntities.numbers) {
+      phraseBoostClauses.push({
+        match_phrase: {
+          content: {
+            query: number,
+            boost: 2.0
+          }
+        }
+      });
+      phraseBoostClauses.push({
+        match_phrase: {
+          extracted_numbers: {
+            query: number,
+            boost: 3.5
+          }
+        }
+      });
+    }
+  }
+
+  // Episodic docs do not include env/api_version, task_scope, or context_id; tailor filters accordingly
+  // Episodic memories are task-scoped (use task_id only, no context_id or scopes)
   const eopts: FilterOptions = {
     tenant_id: fopts.tenant_id,
     project_id: fopts.project_id,
-    // Relax episodic filters: try task_id-only to compare
-    // context_id: fopts.context_id,
-    // task_id excluded for minimal episodic recall
+    task_id: fopts.task_id,
+    scopes: undefined,  // Episodic docs don't have task_scope field
     tags: fopts.tags,
     exclude_tags: fopts.exclude_tags,
     recent_days: fopts.recent_days
   };
   const filter = buildBoolFilter(eopts);
+  const rangeFilters = temporalRange ? [{ range: { round_date: temporalRange } }] : [];
+  const baseFilters = [...(filter.bool.filter || []), ...(filter.bool.must || []), ...rangeFilters];
+  const mustNotClauses = filter.bool.must_not || [];
 
   // Optional time decay on ts
   const tdEnabled = retrievalBoolean("time_decay.enabled", false);
   const tdHalfLife = retrievalNumber("time_decay.episodic.half_life_days", 45);
   const tdWeight = retrievalNumber("time_decay.episodic.weight", 0.25);
 
-  const shouldClauses: any[] = isTemporal
-    ? [
-        {
-          simple_query_string: {
-            query:
-              "day OR days OR week OR weeks OR month OR months OR jan* OR feb* OR mar* OR apr* OR may OR jun* OR jul* OR aug* OR sep* OR oct* OR nov* OR dec* OR /",
-            fields: ["content^1", "content.raw^0.5"]
+  const shouldClauses: any[] = [
+    ...(isTemporal
+      ? [
+          {
+            simple_query_string: {
+              query:
+                "day OR days OR week OR weeks OR month OR months OR jan* OR feb* OR mar* OR apr* OR may OR jun* OR jul* OR aug* OR sep* OR oct* OR nov* OR dec* OR /",
+              fields: ["content^1", "content.raw^0.5", "facts_text^0.8"]
+            }
           }
-        }
-      ]
-    : [];
+        ]
+      : []),
+    // Add phrase match boosts for extracted entities, dates, and numbers
+    ...phraseBoostClauses
+  ];
+
   const boolQuery: any = isTemporal
     ? {
         bool: {
@@ -991,17 +1162,17 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
           minimum_should_match: 1,
           must: [],
           // Move tenant/project constraints to filter to avoid unintended must interactions
-          filter: [...(filter.bool.filter || []), ...(filter.bool.must || [])],
-          must_not: filter.bool.must_not
+          filter: baseFilters,
+          must_not: mustNotClauses
         }
       }
     : {
         bool: {
-          // Keep lexical clause in must; move constraints to filter for stability and recall
+          // Keep lexical clause in must; add phrase boosts in should for scoring
           must: [mmClause],
           ...(shouldClauses.length ? { should: shouldClauses } : {}),
-          filter: [...(filter.bool.filter || []), ...(filter.bool.must || [])],
-          must_not: filter.bool.must_not
+          filter: baseFilters,
+          must_not: mustNotClauses
         }
       };
 
@@ -1070,8 +1241,8 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
               { match: { content: { query: String(q.objective ?? ""), operator: "or" } } }
             ],
             // Move tenant/project terms to filter to avoid accidental scoring interference
-            filter: [...(filter.bool.filter || []), ...(filter.bool.must || [])],
-            must_not: filter.bool.must_not || []
+            filter: baseFilters,
+            must_not: mustNotClauses || []
           }
         }
       };
@@ -1100,13 +1271,13 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
               {
                 simple_query_string: {
                   query: String(q.objective ?? ""),
-                  fields: ["content^3", "content.raw^0.5", "tags^2"],
+                  fields: ["content^3", "content.raw^0.5", "facts_text^2", "tags^2"],
                   default_operator: "or"
                 }
               }
             ],
-            filter: [...(filter.bool.filter || []), ...(filter.bool.must || [])],
-            must_not: filter.bool.must_not || []
+            filter: baseFilters,
+            must_not: mustNotClauses || []
           }
         }
       };
@@ -1175,9 +1346,66 @@ function computedMinShouldMatch(q: string, pct: number): string | null {
 }
 
 /** Heuristic: detect temporal counting questions where MMR should be disabled and date-bearing text boosted */
+const MONTH_LOOKUP = new Map<string, number>([
+  ["january", 0],
+  ["february", 1],
+  ["march", 2],
+  ["april", 3],
+  ["may", 4],
+  ["june", 5],
+  ["july", 6],
+  ["august", 7],
+  ["september", 8],
+  ["october", 9],
+  ["november", 10],
+  ["december", 11]
+]);
+
 function isTemporalQuery(q: string | undefined): boolean {
   const s = (q || "").toLowerCase();
-  return /\b(how many days?|days? between|how long|number of days?|time difference|days? from|days? until|how many weeks?)\b/.test(s);
+  return (
+    /\b(how many days?|days? between|how long|number of days?|time difference|days? from|days? until|how many weeks?)\b/.test(s) ||
+    /\b(when|what year|which year|year|date|month|day)\b/.test(s) ||
+    /\b(19\d{2}|20\d{2})\b/.test(s) ||
+    /\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/.test(s)
+  );
+}
+
+function extractTemporalRange(q: string): { gte?: string; lte?: string } | null {
+  const s = (q || "").toLowerCase();
+  const yearMatch = s.match(/\b(19\d{2}|20\d{2})\b/);
+  const monthMatch = s.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/);
+
+  if (monthMatch && yearMatch) {
+    const monthIdx = MONTH_LOOKUP.get(monthMatch[1]);
+    const year = Number(yearMatch[1]);
+    if (monthIdx !== undefined && Number.isFinite(year)) {
+      const dayMatch = s.match(/\b([0-3]?\d)(?:st|nd|rd|th)?\b/);
+      const pad = (n: number) => String(n).padStart(2, "0");
+      if (dayMatch) {
+        const day = Number(dayMatch[1]);
+        if (day >= 1 && day <= 31) {
+          const dayStr = pad(Math.min(day, new Date(Date.UTC(year, monthIdx + 1, 0)).getUTCDate()));
+          const iso = `${year}-${pad(monthIdx + 1)}-${dayStr}`;
+          return { gte: iso, lte: iso };
+        }
+      }
+      const lastDay = new Date(Date.UTC(year, monthIdx + 1, 0)).getUTCDate();
+      return {
+        gte: `${year}-${pad(monthIdx + 1)}-01`,
+        lte: `${year}-${pad(monthIdx + 1)}-${pad(lastDay)}`
+      };
+    }
+  }
+
+  if (yearMatch) {
+    const year = Number(yearMatch[1]);
+    if (Number.isFinite(year)) {
+      return { gte: `${year}-01-01`, lte: `${year}-12-31` };
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -1233,28 +1461,37 @@ async function handleWriteIfSalient(req: any) {
 async function handleRetrieveAndPack(req: any) {
   // Normalize MCP tool arguments
   (req as any).params = normalizeParamsContainer(req);
-  requireContext(); // ensure context set
-  const rres = await handleRetrieve({ params: req.params });
+  // Note: handleRetrieve will call requireContext() with fallback logic, so we don't call it here
 
-  const system = String(req.params?.system ?? "");
-  const task_frame = String(req.params?.task_frame ?? "");
-  const tool_state = String(req.params?.tool_state ?? "");
-  const recent_turns = String(req.params?.recent_turns ?? "");
+  try {
+    log("retrieve_and_pack.before_retrieve", { params_keys: Object.keys(req.params || {}), has_objective: !!req.params?.objective });
+    const rres = await handleRetrieve(req);
+    log("retrieve_and_pack.after_retrieve", { snippets_count: rres.snippets?.length || 0 });
 
-  const retrievedText = rres.snippets
-    .map((s, i) => `[#${i + 1}] (${s.source}; score=${(s.score ?? 0).toFixed(3)}) ${s.text}`)
-    .join("\n");
+    const system = String(req.params?.system ?? "");
+    const task_frame = String(req.params?.task_frame ?? "");
+    const tool_state = String(req.params?.tool_state ?? "");
+    const recent_turns = String(req.params?.recent_turns ?? "");
 
-  const sections = [
-    system ? { name: "system", content: system } : null,
-    task_frame ? { name: "task_frame", content: task_frame } : null,
-    tool_state ? { name: "tool_state", content: tool_state } : null,
-    retrievedText ? { name: "retrieved", content: retrievedText } : null,
-    recent_turns ? { name: "recent_turns", content: recent_turns } : null
-  ].filter(Boolean) as { name: string; content: string }[];
+    const retrievedText = rres.snippets
+      .map((s, i) => `[#${i + 1}] (${s.source}; score=${(s.score ?? 0).toFixed(3)}) ${s.text}`)
+      .join("\n");
 
-  const packed_prompt = packPrompt(sections);
-  return { snippets: rres.snippets, packed_prompt };
+    const sections = [
+      system ? { name: "system", content: system } : null,
+      task_frame ? { name: "task_frame", content: task_frame } : null,
+      tool_state ? { name: "tool_state", content: tool_state } : null,
+      retrievedText ? { name: "retrieved", content: retrievedText } : null,
+      recent_turns ? { name: "recent_turns", content: recent_turns } : null
+    ].filter(Boolean) as { name: string; content: string }[];
+
+    const packed_prompt = packPrompt(sections);
+    log("retrieve_and_pack.done", { snippets: rres.snippets.length, prompt_len: packed_prompt.length });
+    return { snippets: rres.snippets, packed_prompt };
+  } catch (err: any) {
+    log("retrieve_and_pack.error", { error: String(err?.message ?? err) });
+    return { snippets: [], packed_prompt: "" };
+  }
 }
 
 /**

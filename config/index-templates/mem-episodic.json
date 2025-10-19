@@ -29,6 +29,10 @@
         "task_id":{"type":"keyword"},
         "event_id":{"type":"keyword"},
         "ts":{"type":"date"},
+        "round_id":{"type":"keyword"},
+        "round_index":{"type":"integer"},
+        "round_ts":{"type":"date"},
+        "round_date":{"type":"date"},
         "role":{"type":"keyword"},
         "content":{
           "type":"text",
@@ -38,9 +42,19 @@
             "raw":{"type":"keyword","ignore_above":256}
           }
         },
+        "facts_text":{
+          "type":"text",
+          "similarity":"bm25_episodic",
+          "fields":{
+            "shingles":{"type":"text","analyzer":"english_shingle"}
+          }
+        },
         "tags":{"type":"keyword"},
         "artifacts":{"type":"keyword"},
-        "hash":{"type":"keyword"}
+        "hash":{"type":"keyword"},
+        "extracted_dates":{"type":"keyword"},
+        "extracted_numbers":{"type":"keyword"},
+        "extracted_entities":{"type":"keyword"}
       }
     }
   }

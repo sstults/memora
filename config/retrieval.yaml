@@ -8,7 +8,7 @@ stages:
     query_type: bm25         # BM25 or match
     filters:
       default_scope: ["this_task", "project"]
-      recent_days: 0         # diagnostic: disable recency cutoff temporarily
+      recent_days: 30        # allow ~1 month of recency bias for episodic stage
   semantic:
     enabled: false
     top_k: 150
@@ -45,7 +45,7 @@ lexical:
   # Lexical/BM25 query tuning
   multi_match_type: best_fields
   tie_breaker: 0.3
-  min_should_match_pct: 0    # diagnostic: disable MSM to prevent over-pruning
+  min_should_match_pct: 60
   use_shingles: true         # use *.shingles fields when available
 
 time_decay:
