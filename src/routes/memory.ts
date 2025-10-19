@@ -1364,7 +1364,7 @@ async function handleWriteIfSalient(req: any) {
 async function handleRetrieveAndPack(req: any) {
   // Normalize MCP tool arguments
   (req as any).params = normalizeParamsContainer(req);
-  requireContext(); // ensure context set
+  // Note: handleRetrieve will call requireContext() with fallback logic, so we don't call it here
 
   try {
     log("retrieve_and_pack.before_retrieve", { params_keys: Object.keys(req.params || {}), has_objective: !!req.params?.objective });
