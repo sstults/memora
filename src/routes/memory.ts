@@ -8,6 +8,7 @@ import { getClient, bulkSafe, indexWithRetries, searchWithRetries, withRetries }
 import { embed } from "../services/embedder.js";
 import { scoreSalience, atomicSplit, summarizeIfLong, redact } from "../services/salience.js";
 import { policyNumber, policyArray, retrievalNumber, retrievalArray, retrievalBoolean, retrievalString } from "../services/config.js";
+import { extractEntities } from "../services/entity-extraction.js";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
@@ -399,14 +400,22 @@ async function handleWrite(req: any) {
 
   // Assemble event from params + context
   const nowIso = new Date().toISOString();
+
+  // Extract entities from content for improved lexical search
+  const content = redact(String(req.params?.content ?? ""));
+  const entities = extractEntities(content);
+
   const event: Event = {
     event_id: uuidv4(),
     ts: req.params?.ts || nowIso,
     role: req.params?.role || "tool",
-    content: redact(String(req.params?.content ?? "")),
+    content,
     tags: req.params?.tags || [],
     artifacts: req.params?.artifacts || [],
     hash: req.params?.hash,
+    extracted_dates: entities.dates.length > 0 ? entities.dates : undefined,
+    extracted_numbers: entities.numbers.length > 0 ? entities.numbers : undefined,
+    extracted_entities: entities.entities.length > 0 ? entities.entities : undefined,
     context: {
       tenant_id: ctx.tenant_id,
       project_id: ctx.project_id,
@@ -789,7 +798,11 @@ function flattenEventForIndex(e: Event) {
     content: e.content,
     tags: e.tags || [],
     artifacts: e.artifacts || [],
-    hash: e.hash || null
+    hash: e.hash || null,
+    // Entity extraction fields for improved lexical search
+    extracted_dates: e.extracted_dates || null,
+    extracted_numbers: e.extracted_numbers || null,
+    extracted_entities: e.extracted_entities || null
   };
 }
 
@@ -847,7 +860,11 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
     ...(useShingles ? ["content.shingles^1.2"] : []),
     "tags^2",
     "artifacts^1",
-    "content.raw^0.5"
+    "content.raw^0.5",
+    // Extracted entity fields for improved recall
+    "extracted_entities^2.5",    // Boost proper nouns (names, places, products)
+    "extracted_dates^2.5",        // Boost date references
+    "extracted_numbers^2"         // Boost numbers with context
   ];
   const mmType = retrievalString("lexical.multi_match_type", "best_fields");
   const tieBreaker = retrievalNumber("lexical.tie_breaker", 0.3);
@@ -884,17 +901,51 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
   const tdHalfLife = retrievalNumber("time_decay.episodic.half_life_days", 45);
   const tdWeight = retrievalNumber("time_decay.episodic.weight", 0.25);
 
-  const shouldClauses: any[] = isTemporal
-    ? [
-        {
-          simple_query_string: {
-            query:
-              "day OR days OR week OR weeks OR month OR months OR jan* OR feb* OR mar* OR apr* OR may OR jun* OR jul* OR aug* OR sep* OR oct* OR nov* OR dec* OR /",
-            fields: ["content^1", "content.raw^0.5"]
+  // Extract entities from query for targeted matching
+  const queryEntities = extractEntities(q.objective);
+
+  // Add phrase match boosting for exact matches (helps with proper nouns and dates)
+  const phraseBoostClauses: any[] = [];
+  for (const entity of queryEntities.entities) {
+    phraseBoostClauses.push({
+      match_phrase: { content: { query: entity, boost: 3.0 } }
+    });
+    phraseBoostClauses.push({
+      match_phrase: { extracted_entities: { query: entity, boost: 4.0 } }
+    });
+  }
+  for (const date of queryEntities.dates) {
+    phraseBoostClauses.push({
+      match_phrase: { content: { query: date, boost: 2.5 } }
+    });
+    phraseBoostClauses.push({
+      match_phrase: { extracted_dates: { query: date, boost: 4.0 } }
+    });
+  }
+  for (const number of queryEntities.numbers) {
+    phraseBoostClauses.push({
+      match_phrase: { content: { query: number, boost: 2.0 } }
+    });
+    phraseBoostClauses.push({
+      match_phrase: { extracted_numbers: { query: number, boost: 3.5 } }
+    });
+  }
+
+  const shouldClauses: any[] = [
+    ...(isTemporal
+      ? [
+          {
+            simple_query_string: {
+              query:
+                "day OR days OR week OR weeks OR month OR months OR jan* OR feb* OR mar* OR apr* OR may OR jun* OR jul* OR aug* OR sep* OR oct* OR nov* OR dec* OR /",
+              fields: ["content^1", "content.raw^0.5"]
+            }
           }
-        }
-      ]
-    : [];
+        ]
+      : []),
+    // Add phrase match boosts for extracted entities, dates, and numbers
+    ...phraseBoostClauses
+  ];
   const boolQuery: any = isTemporal
     ? {
         bool: {

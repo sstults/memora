@@ -21,6 +21,9 @@ export interface Event {
   tags?: string[];
   artifacts?: string[];
   hash?: string;
+  extracted_dates?: string[];    // Extracted date references (ISO dates, temporal expressions)
+  extracted_numbers?: string[];  // Extracted numbers with context
+  extracted_entities?: string[]; // Extracted proper nouns (people, places, products, orgs)
   context: Context;
 }
 
