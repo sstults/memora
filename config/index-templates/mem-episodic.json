@@ -51,7 +51,10 @@
         },
         "tags":{"type":"keyword"},
         "artifacts":{"type":"keyword"},
-        "hash":{"type":"keyword"}
+        "hash":{"type":"keyword"},
+        "extracted_dates":{"type":"keyword"},
+        "extracted_numbers":{"type":"keyword"},
+        "extracted_entities":{"type":"keyword"}
       }
     }
   }

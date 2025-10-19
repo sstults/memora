@@ -26,6 +26,9 @@ export interface Event {
   round_ts?: string;
   round_date?: string;
   facts_text?: string[];
+  extracted_dates?: string[];    // Extracted date references (ISO dates, temporal expressions)
+  extracted_numbers?: string[];  // Extracted numbers with context
+  extracted_entities?: string[]; // Extracted proper nouns (people, places, products, orgs)
   context: Context;
 }
 
