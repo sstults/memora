@@ -1365,27 +1365,36 @@ async function handleRetrieveAndPack(req: any) {
   // Normalize MCP tool arguments
   (req as any).params = normalizeParamsContainer(req);
   requireContext(); // ensure context set
-  const rres = await handleRetrieve({ params: req.params });
 
-  const system = String(req.params?.system ?? "");
-  const task_frame = String(req.params?.task_frame ?? "");
-  const tool_state = String(req.params?.tool_state ?? "");
-  const recent_turns = String(req.params?.recent_turns ?? "");
+  try {
+    log("retrieve_and_pack.before_retrieve", { params_keys: Object.keys(req.params || {}), has_objective: !!req.params?.objective });
+    const rres = await handleRetrieve(req);
+    log("retrieve_and_pack.after_retrieve", { snippets_count: rres.snippets?.length || 0 });
 
-  const retrievedText = rres.snippets
-    .map((s, i) => `[#${i + 1}] (${s.source}; score=${(s.score ?? 0).toFixed(3)}) ${s.text}`)
-    .join("\n");
+    const system = String(req.params?.system ?? "");
+    const task_frame = String(req.params?.task_frame ?? "");
+    const tool_state = String(req.params?.tool_state ?? "");
+    const recent_turns = String(req.params?.recent_turns ?? "");
 
-  const sections = [
-    system ? { name: "system", content: system } : null,
-    task_frame ? { name: "task_frame", content: task_frame } : null,
-    tool_state ? { name: "tool_state", content: tool_state } : null,
-    retrievedText ? { name: "retrieved", content: retrievedText } : null,
-    recent_turns ? { name: "recent_turns", content: recent_turns } : null
-  ].filter(Boolean) as { name: string; content: string }[];
+    const retrievedText = rres.snippets
+      .map((s, i) => `[#${i + 1}] (${s.source}; score=${(s.score ?? 0).toFixed(3)}) ${s.text}`)
+      .join("\n");
 
-  const packed_prompt = packPrompt(sections);
-  return { snippets: rres.snippets, packed_prompt };
+    const sections = [
+      system ? { name: "system", content: system } : null,
+      task_frame ? { name: "task_frame", content: task_frame } : null,
+      tool_state ? { name: "tool_state", content: tool_state } : null,
+      retrievedText ? { name: "retrieved", content: retrievedText } : null,
+      recent_turns ? { name: "recent_turns", content: recent_turns } : null
+    ].filter(Boolean) as { name: string; content: string }[];
+
+    const packed_prompt = packPrompt(sections);
+    log("retrieve_and_pack.done", { snippets: rres.snippets.length, prompt_len: packed_prompt.length });
+    return { snippets: rres.snippets, packed_prompt };
+  } catch (err: any) {
+    log("retrieve_and_pack.error", { error: String(err?.message ?? err) });
+    return { snippets: [], packed_prompt: "" };
+  }
 }
 
 /**

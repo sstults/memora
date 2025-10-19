@@ -11,6 +11,7 @@ import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
+import http from "node:http";
 
 // MemoryAdapter and MCP SDK (ESM paths)
 import MemoryAdapter, { McpClient, type Scope } from "../adapters/memora_adapter.js";
@@ -89,6 +90,36 @@ function ensureDirForFile(filePath: string) {
 
 function writeJSONL(filePath: string, obj: any) {
   fs.appendFileSync(filePath, JSON.stringify(obj) + "\n", "utf8");
+}
+
+/**
+ * Force OpenSearch to refresh episodic indices so newly-written documents become searchable immediately.
+ * By default, OpenSearch has a 1-second refresh interval, which causes benchmarks to query before
+ * documents are indexed. This function calls the _refresh API to make documents available immediately.
+ */
+async function refreshEpisodicIndices(): Promise<void> {
+  const osUrl = process.env.OPENSEARCH_URL || "http://localhost:9200";
+  const url = new URL("/mem-episodic-*/_refresh", osUrl);
+
+  return new Promise((resolve, reject) => {
+    const req = http.request(url, { method: "POST" }, (res) => {
+      let data = "";
+      res.on("data", (chunk) => { data += chunk; });
+      res.on("end", () => {
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          resolve();
+        } else {
+          reject(new Error(`OpenSearch refresh failed: ${res.statusCode} ${data}`));
+        }
+      });
+    });
+    req.on("error", reject);
+    req.setTimeout(5000, () => {
+      req.destroy();
+      reject(new Error("OpenSearch refresh timeout"));
+    });
+    req.end();
+  });
 }
 
 function loadDataset(p: string): Sample[] {
@@ -672,6 +703,14 @@ async function main() {
         writeJSONL(out, { ts: new Date().toISOString(), op: "diag", stage: "replay", qid, mode: replayMode, attempted: replayStats.attempted, written: replayStats.written });
       } catch (err: any) {
         writeJSONL(out, { ts: new Date().toISOString(), op: "warn", stage: "replay_sessions", qid, error: String(err?.message ?? err) });
+      }
+
+      // Force OpenSearch to refresh indices so newly-written documents become searchable
+      try {
+        await refreshEpisodicIndices();
+        writeJSONL(out, { ts: new Date().toISOString(), op: "diag", stage: "refresh", qid, success: true });
+      } catch (err: any) {
+        writeJSONL(out, { ts: new Date().toISOString(), op: "warn", stage: "refresh", qid, error: String(err?.message ?? err) });
       }
 
       // Retrieve memory context for the question with expanded budget and tags
