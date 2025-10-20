@@ -13,7 +13,7 @@ describe("config readers - booleans, defaults, and cache reset", () => {
     // True booleans from YAML
     expect(retrievalBoolean("stages.episodic.enabled", false)).toBe(true);
     expect(retrievalBoolean("stages.semantic.enabled", false)).toBe(false);
-    expect(retrievalBoolean("diversity.enabled", false)).toBe(false);
+    expect(retrievalBoolean("diversity.enabled", false)).toBe(true); // changed to true in commit 4a6ef34
     expect(retrievalBoolean("rerank.enabled", false)).toBe(false);
 
     // Numeric -> boolean coercion (non-zero => true)
@@ -41,7 +41,7 @@ describe("config readers - booleans, defaults, and cache reset", () => {
     } = mod as any;
 
     // Prime caches with real file values
-    expect(retrievalNumber("stages.semantic.top_k", 0)).toBe(150);
+    expect(retrievalNumber("stages.semantic.top_k", 0)).toBe(50); // changed from 150 to 50 in commit 4a6ef34
 
     // Mock a different YAML payload for subsequent reads
     const mockedYaml = `

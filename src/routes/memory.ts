@@ -774,7 +774,7 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
         rrfK: getPolicy("fusion.rrf_k", 60),
         normalizeScores: retrievalBoolean("fusion.normalize_scores", true),
         mmr: {
-          enabled: retrievalBoolean("diversity.enabled", false) && !isTemporalQuery(q2.objective),
+          enabled: retrievalBoolean("diversity.enabled", false) && !isTemporalQueryExpanded(q2.objective),
           lambda: getPolicy("diversity.lambda", 0.8),
           minDistance: getPolicy("diversity.min_distance", 0.2),
           maxPerTag: getPolicy("diversity.max_per_tag", 5)

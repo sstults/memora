@@ -220,3 +220,184 @@ Outputs:
 Notes:
 - The LoCoMo driver reuses Memora MCP tools via MemoryAdapter and packing.yaml to build a compact retrieval context.
 - When no OPENAI_API_KEY is available, predictions contain empty `output`; this is still useful to verify plumbing and reference alignment.
+
+---
+
+## Refactored LongMemEval Runner (2025-10-20)
+
+The `run_longmemeval.sh` script has been refactored to provide better visibility, validation, and control over the benchmark workflow.
+
+### Quick Start
+
+**Full benchmark run:**
+```bash
+./benchmarks/runners/run_longmemeval.sh --variant C --seed 42
+```
+
+**Check configuration without running:**
+```bash
+./benchmarks/runners/run_longmemeval.sh --variant C --seed 42 --dry-run
+```
+
+**Get help:**
+```bash
+./benchmarks/runners/run_longmemeval.sh --help
+```
+
+### Key Improvements
+
+1. **Pre-Flight Environment Checks**
+   - Validates `.env` file, `OPENAI_API_KEY`, OpenSearch health, dependencies
+   - Use `./scripts/check_env.sh` standalone or `--check-env` flag (enabled by default)
+   - Skip with `--no-check-env` if confident environment is correct
+
+2. **Explicit Phase Control**
+   - **Write Phase**: `--write-phase` / `--no-write-phase` (auto-enabled for Variant C)
+   - **Retrieve Phase**: `--retrieve-phase` / `--no-retrieve-phase`
+   - **Score Phase**: `--score-phase` / `--no-score-phase`
+   - **Aggregate Phase**: `--aggregate-phase` / `--no-aggregate-phase`
+
+3. **Write Validation**
+   - Checks OpenSearch document count before/after write phase
+   - Detects silent failures (circuit breakers, index creation issues)
+   - Use `--validate-writes` (default) or `--no-validate-writes`
+
+4. **Better Error Messages**
+   - Clear, actionable error messages with suggestions
+   - Color-coded output (green=success, red=error, yellow=warning, blue=info)
+   - Detailed logs in `benchmarks/logs/`
+
+5. **Dry Run Mode**
+   - `--dry-run` prints configuration without executing
+   - Useful for validating parameters before long runs
+
+### Common Use Cases
+
+**Write phase only** (populate memory):
+```bash
+./benchmarks/runners/run_longmemeval.sh \
+  --variant C \
+  --seed 42 \
+  --write-phase \
+  --no-retrieve-phase \
+  --no-score-phase \
+  --no-aggregate-phase
+```
+
+**Retrieve phase only** (assumes writes done):
+```bash
+./benchmarks/runners/run_longmemeval.sh \
+  --variant C \
+  --seed 42 \
+  --no-write-phase \
+  --retrieve-phase \
+  --no-score-phase \
+  --no-aggregate-phase
+```
+
+**Score phase only** (re-score existing predictions):
+```bash
+./benchmarks/runners/run_longmemeval.sh \
+  --variant C \
+  --seed 42 \
+  --no-write-phase \
+  --no-retrieve-phase \
+  --score-phase \
+  --no-aggregate-phase
+```
+
+**Quick 50-question test:**
+```bash
+./benchmarks/runners/run_longmemeval.sh \
+  --variant C \
+  --seed 42 \
+  --dataset benchmarks/LongMemEval/data/longmemeval_oracle_50q.json
+```
+
+### Environment Validation Script
+
+Use `./scripts/check_env.sh` to validate your environment before running benchmarks:
+
+```bash
+./scripts/check_env.sh
+```
+
+This checks:
+- ✓ `.env` file exists and loads correctly
+- ✓ `OPENAI_API_KEY` is set
+- ✓ OpenSearch is running and healthy
+- ✓ Node.js, npm, Docker are installed
+- ✓ Project is built (`dist/` exists)
+- ✓ Python environment is configured
+- ✓ Benchmark datasets exist
+
+### Troubleshooting
+
+**Issue: "OPENAI_API_KEY not set"**
+```bash
+echo "OPENAI_API_KEY=sk-proj-..." >> .env
+```
+
+**Issue: "Cannot connect to OpenSearch"**
+```bash
+cd docker && docker compose up -d
+# Wait for healthy status
+curl http://localhost:9200/_cluster/health
+```
+
+**Issue: "Write phase completed but no documents were indexed"**
+
+This usually means OpenSearch circuit breaker triggered (heap too small). Fix:
+1. Edit `docker/docker-compose.yml`:
+   ```yaml
+   - "OPENSEARCH_JAVA_OPTS=-Xms2g -Xmx2g"  # Increase from 1g to 2g
+   ```
+2. Restart: `cd docker && docker compose restart`
+
+**Issue: "Dataset file not found"**
+```bash
+git submodule update --init --recursive
+```
+
+### Output Files
+
+All outputs in `benchmarks/reports/`:
+- `longmemeval.C.42.jsonl` - Raw predictions
+- `longmemeval.C.42.filtered.jsonl` - Filtered for evaluation
+- `longmemeval.C.42.filtered.jsonl.eval-results-gpt-4o` - Evaluation results (JSON)
+- `longmemeval.C.42.stats.csv` - Telemetry (CSV)
+- `longmemeval.C.42.stats.md` - Telemetry (Markdown)
+
+### Logs
+
+All logs in `benchmarks/logs/`:
+- `longmemeval.C.42.build.log` - Build output
+- `longmemeval.C.42.driver.log` - Write + Retrieve phase
+- `longmemeval.C.42.score.log` - Scoring phase
+- `longmemeval.C.42.aggregate.log` - Aggregation phase
+
+### Available Options
+
+Run with `--help` to see all options:
+```bash
+./benchmarks/runners/run_longmemeval.sh --help
+```
+
+Key options:
+- `--variant A|B|C` - Memory system variant (default: C)
+- `--seed N` - Random seed (default: 42)
+- `--dataset PATH` - Dataset file (default: 50q subset)
+- `--out PATH` - Output predictions file (default: auto-generated)
+- `--tag TAG` - Tag for evaluation (default: memora)
+- `--dry-run` - Print config and exit
+- `--no-check-env` - Skip environment checks
+- `--no-validate-writes` - Skip write validation
+
+### Migration from Old Script
+
+The old script usage:
+```bash
+./benchmarks/runners/run_longmemeval.sh --variant C --seed 42 --out benchmarks/reports/longmemeval.C.42.jsonl
+```
+
+Still works! The refactored script is backwards compatible with the old positional arguments.
