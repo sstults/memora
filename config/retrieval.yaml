@@ -4,14 +4,14 @@
 stages:
   episodic:
     enabled: true
-    top_k: 100
+    top_k: 100               # Lexical-only retrieval (no semantic fusion)
     query_type: bm25         # BM25 or match
     filters:
       default_scope: ["this_task", "project"]
       recent_days: 0         # diagnostic: disable recency cutoff temporarily
   semantic:
-    enabled: false
-    top_k: 150
+    enabled: false           # DISABLED: semantic/hybrid search moved to feature branch
+    top_k: 50                # Add 50 semantic results via k-NN
     ann_candidates: 200
     metric: cosine
     filters:
@@ -25,7 +25,7 @@ stages:
 fusion:
   method: rrf
   rrf_k: 60
-  normalize_scores: true
+  normalize_scores: false  # Disabled: RRF only uses rank, not score magnitude
 
 rerank:
   enabled: false
@@ -35,11 +35,12 @@ rerank:
   budget_usd: 0.01           # optional cost budget per retrieval
 
 diversity:
-  enabled: false
+  enabled: true              # Enable for multi-session aggregation queries
   method: mmr
-  lambda: 0.8                # tradeoff relevance vs. diversity
+  lambda: 0.8                # tradeoff relevance vs. diversity (favor relevance)
   min_distance: 0.2          # threshold for considering items duplicates
   max_per_tag: 5             # prevent one tag (e.g., "error") from dominating
+  # Note: MMR implementation needs to be added to memory.ts to take effect
 
 lexical:
   # Lexical/BM25 query tuning

@@ -10,14 +10,19 @@ It is designed to support **long-running tasks, multi-project contexts, and coll
 
 ## Branching model
 
-- main (Minimal POC)
+- main (Lexical-only BM25)
   - Only memory.write and memory.retrieve are registered tools.
+  - Uses pure lexical BM25 retrieval (no semantic/vector search, no hybrid fusion).
   - Diagnostics are quiet by default; advanced stages remain disabled via config.
-  - No re-enabling of semantic/facts/packing/promotion/rerank on main by default.
+  - Best for keyword-heavy fact retrieval (achieves 54-56% on LongMemEval multi-session).
+- feature/semantic-search
+  - Adds k-NN vector search, embeddings, hybrid fusion (RRF), and OpenSearch ML model registration.
+  - Currently underperforms lexical baseline (50-51% vs 54-56% on multi-session tasks).
+  - Use this branch to experiment with semantic search improvements.
 - archive/full-featured
   - Read-only reference with full features prior to slimdown. Do not merge into main.
 - feature/*
-  - Develop and validate features in isolation (e.g., feature/re-enable-semantic, feature/facts-and-pack).
+  - Develop and validate features in isolation (e.g., feature/facts-and-pack).
   - Keep defaults off; update tests and docs in-branch.
 - hotfix/*
   - Emergency fixes to main that preserve Minimal POC invariants.

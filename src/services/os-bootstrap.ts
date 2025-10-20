@@ -26,7 +26,7 @@
 import fs from "fs";
 import path from "path";
 import { assertHealthy, ensureIndex, putIndexTemplate } from "./os-client.js";
-import { ensurePipelineAndAttachmentFromEnv, ensureSearchPipelineFromEnv } from "./os-ml.js";
+// import { ensurePipelineAndAttachmentFromEnv, ensureSearchPipelineFromEnv } from "./os-ml.js";
 
 export interface BootstrapOptions {
   applyTemplates?: boolean;
@@ -176,8 +176,10 @@ export async function bootstrapOpenSearch(opts: BootstrapOptions = {}): Promise<
   }
 
   // 6) Provision ML ingest pipeline and optional default_pipeline attach (no-op unless configured)
-  await ensurePipelineAndAttachmentFromEnv();
+  // NOTE: Disabled in lexical-only main branch. Enable on feature/semantic-search branch if needed.
+  // await ensurePipelineAndAttachmentFromEnv();
 
   // 7) Provision search pipeline and optionally attach index.search.default_pipeline (no-op unless configured)
-  await ensureSearchPipelineFromEnv();
+  // NOTE: Disabled in lexical-only main branch. Enable on feature/semantic-search branch if needed.
+  // await ensureSearchPipelineFromEnv();
 }
