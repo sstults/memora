@@ -217,15 +217,12 @@ async function main() {
 
       // Salience-aware write with low threshold to maximize recall
       try {
-        await adapter.writeIfSalient(
-          {
-            text: r.context || "",
-            tags: ["bench", "mab", split, `source:${r.source ?? "unknown"}`],
-            scope: "this_task",
-            task_id: `mab-${seed}`
-          },
-          0.05
-        );
+        await adapter.writeIfSalient({
+          text: r.context || "",
+          tags: ["bench", "mab", split, `source:${r.source ?? "unknown"}`],
+          scope: "this_task",
+          task_id: `mab-${seed}`
+        });
       } catch {
         // non-fatal
       }

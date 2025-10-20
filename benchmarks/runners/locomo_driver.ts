@@ -239,15 +239,12 @@ async function main() {
       seenContexts.add(h);
 
       try {
-        await adapter.writeIfSalient(
-          {
-            text: r.context || "",
-            tags: ["bench", "locomo", split, `source:${r.source ?? "unknown"}`],
-            scope: "this_task",
-            task_id: `locomo-${seed}`
-          },
-          0.05
-        );
+        await adapter.writeIfSalient({
+          text: r.context || "",
+          tags: ["bench", "locomo", split, `source:${r.source ?? "unknown"}`],
+          scope: "this_task",
+          task_id: `locomo-${seed}`
+        });
       } catch {
         // non-fatal
       }

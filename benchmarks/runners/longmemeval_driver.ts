@@ -250,9 +250,9 @@ async function createOpenAI(): Promise<any> {
   return new OpenAI({ apiKey });
 }
 
-async function answerWithOpenAI(openai: any, llmCfg: any, question: string, context: string): Promise<{ text: string; usage?: any; latency_ms: number }> {
+async function answerWithOpenAI(openai: any, llmCfg: any, question: string, context: string, seed?: number): Promise<{ text: string; usage?: any; latency_ms: number }> {
   const model = llmCfg?.model ?? "gpt-4.1-mini";
-  const temperature = typeof llmCfg?.temperature === "number" ? llmCfg.temperature : 0.2;
+  const temperature = typeof llmCfg?.temperature === "number" ? llmCfg.temperature : 0.0;
   const max_tokens = typeof llmCfg?.max_tokens === "number" ? llmCfg.max_tokens : 512;
 
   const sys = "You are a focused assistant for question answering over provided context. Use the context if relevant; if the answer is not present, reply with \"I don't know\". Respond concisely with just the final answer, no explanation.";
@@ -269,6 +269,7 @@ Answer:`;
     model,
     temperature,
     max_tokens,
+    seed: seed,
     messages: [
       { role: "system", content: sys },
       { role: "user", content: user }
@@ -308,13 +309,10 @@ async function replaySessionsToMemora(
           });
           written++;
         } else {
-          const wr = await adapter.writeIfSalient(
-            {
-              text,
-              ...common
-            },
-            0.05 // low threshold to maximize recall
-          );
+          const wr = await adapter.writeIfSalient({
+            text,
+            ...common
+          });
           if (wr?.data?.written) written++;
         }
       } catch {
@@ -546,7 +544,7 @@ async function main() {
         const packSnippets = Array.isArray(pack?.data?.snippets) ? pack.data.snippets.length : 0;
         writeJSONL(out, { ts: new Date().toISOString(), op: "diag", stage: "pack", qid, k: kC, scope: scopes, snippets: packSnippets, packed_len: contextText.length });
         if (openai) {
-          const result = await answerWithOpenAI(openai, llmCfg, question || "", contextText);
+          const result = await answerWithOpenAI(openai, llmCfg, question || "", contextText, seed);
           hypothesis = result.text;
           llm_latency_ms = typeof (result as any)?.latency_ms === "number" ? (result as any).latency_ms : null;
 

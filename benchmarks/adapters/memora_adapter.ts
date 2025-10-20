@@ -88,8 +88,9 @@ export class MemoryAdapter {
     };
   }
 
-  // Salience pre-check: only writes when content has a salient atom
-  async writeIfSalient(item: WriteItem, min_score_override?: number): Promise<Telemetry<{ written: boolean; id?: string }>> {
+  // Note: memory.write_if_salient was removed; now just calls memory.write
+  // Salience filtering happens server-side if configured
+  async writeIfSalient(item: WriteItem): Promise<Telemetry<{ written: boolean; id?: string }>> {
     const t0 = performance.now();
 
     // Include active context (if available) to ensure writes don't fail when server-side context is missing
@@ -101,14 +102,13 @@ export class MemoryAdapter {
       // ignore
     }
 
-    const res = await this.mcp.callTool("memory.write_if_salient", {
+    const res = await this.mcp.callTool("memory.write", {
       role: item.role ?? "tool",
       content: item.text,
       tags: item.tags,
       idempotency_key: item.idempotency_key,
       scope: item.scope,
       task_id: item.task_id,
-      min_score_override,
       ...(ctx ? {
         tenant_id: ctx.tenant_id,
         project_id: ctx.project_id,
@@ -125,7 +125,7 @@ export class MemoryAdapter {
       })
     });
     return {
-      data: { written: !!res.written, id: res.event_id },
+      data: { written: true, id: res.event_id },  // memory.write always writes
       latency_ms: performance.now() - t0
     };
   }
@@ -175,6 +175,7 @@ export class MemoryAdapter {
   }
 
   // Retrieve and return a packed prompt using server-side packer
+  // Note: memory.retrieve_and_pack was removed; now calls memory.retrieve and packs locally
   async pack(
     query: string,
     k = 8,
@@ -183,15 +184,29 @@ export class MemoryAdapter {
     ctx?: SearchCtx
   ): Promise<Telemetry<{ packed: string; snippets: any[] }>> {
     const t0 = performance.now();
-    const res = await this.mcp.callTool("memory.retrieve_and_pack", {
+
+    // Call memory.retrieve to get snippets
+    const res = await this.mcp.callTool("memory.retrieve", {
       objective: query,
       budget: k,
-      ...sections,
       filters,
       ...ctx
     });
+
+    const snippets = Array.isArray(res?.snippets) ? res.snippets : [];
+
+    // Pack snippets into a prompt string (simple concatenation for now)
+    const snippetTexts = snippets.map((s: any, i: number) => `[${i + 1}] ${s.text || s.content || ""}`).join("\n\n");
+
+    let packed = "";
+    if (sections?.system) packed += sections.system + "\n\n";
+    if (sections?.task_frame) packed += sections.task_frame + "\n\n";
+    if (sections?.recent_turns) packed += "## Recent Context\n" + sections.recent_turns + "\n\n";
+    if (snippetTexts) packed += "## Retrieved Memory\n" + snippetTexts + "\n\n";
+    if (sections?.tool_state) packed += sections.tool_state + "\n\n";
+
     return {
-      data: { packed: res?.packed_prompt ?? "", snippets: Array.isArray(res?.snippets) ? res.snippets : [] },
+      data: { packed, snippets },
       latency_ms: performance.now() - t0
     };
   }

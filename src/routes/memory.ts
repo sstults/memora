@@ -9,6 +9,8 @@ import { embed } from "../services/embedder.js";
 import { scoreSalience, atomicSplit, summarizeIfLong, redact } from "../services/salience.js";
 import { policyNumber, policyArray, retrievalNumber, retrievalArray, retrievalBoolean, retrievalString } from "../services/config.js";
 import { extractEntities } from "../services/entity-extraction.js";
+import { expandQuery, isTemporalQuery as isTemporalQueryExpanded } from "../services/query-expansion.js";
+import { classifyQuery, getBoostProfile } from "../services/query-classifier.js";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
@@ -416,6 +418,9 @@ async function handleWrite(req: any) {
     extracted_dates: entities.dates.length > 0 ? entities.dates : undefined,
     extracted_numbers: entities.numbers.length > 0 ? entities.numbers : undefined,
     extracted_entities: entities.entities.length > 0 ? entities.entities : undefined,
+    normalized_dates: entities.normalized_dates,
+    temporal_units: entities.temporal_units,
+    disambiguated_entities: entities.disambiguated_entities,
     context: {
       tenant_id: ctx.tenant_id,
       project_id: ctx.project_id,
@@ -853,31 +858,97 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
   } catch {
     // ignore
   }
+
+  // Query expansion: expand temporal terms for better recall
+  const expandedQueryObj = expandQuery(q.objective);
+  const queryText = expandedQueryObj.expanded;
+
+  // Log query expansion for diagnostics
+  if (expandedQueryObj.hadTemporalExpansion) {
+    try {
+      traceWrite("episodic.query_expansion", {
+        original: expandedQueryObj.original,
+        expanded: expandedQueryObj.expanded,
+        expansions: expandedQueryObj.expansions
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  // Classify query and get boost profile for dynamic boosting
+  const useDynamicBoosting = retrievalBoolean("lexical.dynamic_boosting", true);
+  const classification = classifyQuery(q.objective);
+  const boostProfile = getBoostProfile(classification.primaryType);
+
+  // Log classification for diagnostics
+  try {
+    traceWrite("episodic.query_classification", {
+      query: q.objective,
+      primaryType: classification.primaryType,
+      secondaryTypes: classification.secondaryTypes,
+      confidence: classification.confidence,
+      features: classification.features,
+      boostProfile: boostProfile.name,
+      multiMatchType: retrievalString("lexical.multi_match_type", "best_fields")
+    });
+  } catch {
+    // ignore
+  }
+
   // Build lexical multi_match with optional shingles/keyword subfields and guardrails
   const useShingles = retrievalBoolean("lexical.use_shingles", true);
+
+  // Use dynamic boosting if enabled, otherwise use static baseline boosts
+  const baselineBoosts = {
+    content: 3.0,
+    content_shingles: 1.2,
+    tags: 2.0,
+    artifacts: 1.0,
+    content_raw: 0.5,
+    extracted_entities: 2.5,
+    extracted_dates: 2.5,
+    extracted_numbers: 2.0,
+    normalized_dates: 2.5,
+    temporal_units: 2.5,
+    disambiguated_entities: 2.5,
+    acronyms: 2.0,
+  };
+
+  const boosts = useDynamicBoosting ? boostProfile.fieldBoosts : baselineBoosts;
+
   const fields = [
-    "content^3",
-    ...(useShingles ? ["content.shingles^1.2"] : []),
-    "tags^2",
-    "artifacts^1",
-    "content.raw^0.5",
+    `content^${boosts.content ?? 3.0}`,
+    ...(useShingles ? [`content.shingles^${boosts.content_shingles ?? 1.2}`] : []),
+    `tags^${boosts.tags ?? 2.0}`,
+    `artifacts^${boosts.artifacts ?? 1.0}`,
+    `content.raw^${boosts.content_raw ?? 0.5}`,
     // Extracted entity fields for improved recall
-    "extracted_entities^2.5",    // Boost proper nouns (names, places, products)
-    "extracted_dates^2.5",        // Boost date references
-    "extracted_numbers^2"         // Boost numbers with context
+    `extracted_entities^${boosts.extracted_entities ?? 2.5}`,    // Boost proper nouns (names, places, products)
+    `extracted_dates^${boosts.extracted_dates ?? 2.5}`,          // Boost date references
+    `extracted_numbers^${boosts.extracted_numbers ?? 2.0}`,      // Boost numbers with context
+    // Enhanced entity fields (with fallback if not in profile)
+    ...(boosts.normalized_dates ? [`normalized_dates^${boosts.normalized_dates}`] : []),
+    ...(boosts.temporal_units ? [`temporal_units^${boosts.temporal_units}`] : []),
+    ...(boosts.disambiguated_entities ? [`disambiguated_entities^${boosts.disambiguated_entities}`] : []),
+    ...(boosts.acronyms ? [`acronyms^${boosts.acronyms}`] : [])
   ];
   const mmType = retrievalString("lexical.multi_match_type", "best_fields");
   const tieBreaker = retrievalNumber("lexical.tie_breaker", 0.3);
+
+  // For cross_fields, use default "or" operator for flexibility
+  // cross_fields already provides better term coordination across fields
+  // No need to force "and" operator which would hurt recall
   const msmPct = retrievalNumber("lexical.min_should_match_pct", 60);
-  const isTemporal = isTemporalQuery(String(q.objective ?? ""));
+  const isTemporal = isTemporalQueryExpanded(String(q.objective ?? ""));
   const msm = isTemporal ? null : computedMinShouldMatch(String(q.objective ?? ""), msmPct);
 
   const mmClause: any = {
     multi_match: {
-      query: q.objective,
+      query: queryText,  // Use expanded query text
       type: mmType,
       fields,
-      tie_breaker: tieBreaker,
+      ...(mmType === "cross_fields" ? {} : { tie_breaker: tieBreaker }),  // tie_breaker not used with cross_fields
       lenient: true,
       ...(msm ? { minimum_should_match: msm } : {})
     }
@@ -904,31 +975,93 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
   // Extract entities from query for targeted matching
   const queryEntities = extractEntities(q.objective);
 
+  // Get phrase boost values from profile (with baseline fallbacks)
+  const baselinePhraseBoosts = {
+    entity_content: 3.0,
+    entity_extracted: 4.0,
+    date_content: 2.5,
+    date_extracted: 4.0,
+    date_normalized: 5.0,
+    number_content: 2.0,
+    number_extracted: 3.5,
+    temporal_unit: 4.5,
+    disambiguated_entity: 5.0,
+    acronym: 2.5,
+  };
+
+  const phraseBoosts = useDynamicBoosting ? boostProfile.phraseBoosts : baselinePhraseBoosts;
+
   // Add phrase match boosting for exact matches (helps with proper nouns and dates)
   const phraseBoostClauses: any[] = [];
+
+  // Boost entity matches
   for (const entity of queryEntities.entities) {
     phraseBoostClauses.push({
-      match_phrase: { content: { query: entity, boost: 3.0 } }
+      match_phrase: { content: { query: entity, boost: phraseBoosts.entity_content ?? 3.0 } }
     });
     phraseBoostClauses.push({
-      match_phrase: { extracted_entities: { query: entity, boost: 4.0 } }
+      match_phrase: { extracted_entities: { query: entity, boost: phraseBoosts.entity_extracted ?? 4.0 } }
     });
   }
+
+  // Boost disambiguated entity matches (higher boost for precise matches)
+  if (queryEntities.disambiguated_entities && queryEntities.disambiguated_entities.length > 0) {
+    for (const disambigEntity of queryEntities.disambiguated_entities) {
+      phraseBoostClauses.push({
+        match_phrase: { disambiguated_entities: { query: disambigEntity, boost: phraseBoosts.disambiguated_entity ?? 5.0 } }
+      });
+    }
+  }
+
+  // Boost date matches
   for (const date of queryEntities.dates) {
     phraseBoostClauses.push({
-      match_phrase: { content: { query: date, boost: 2.5 } }
+      match_phrase: { content: { query: date, boost: phraseBoosts.date_content ?? 2.5 } }
     });
     phraseBoostClauses.push({
-      match_phrase: { extracted_dates: { query: date, boost: 4.0 } }
+      match_phrase: { extracted_dates: { query: date, boost: phraseBoosts.date_extracted ?? 4.0 } }
     });
   }
+
+  // Boost normalized date matches (absolute dates from relative expressions)
+  if (queryEntities.normalized_dates && queryEntities.normalized_dates.length > 0) {
+    for (const normDate of queryEntities.normalized_dates) {
+      phraseBoostClauses.push({
+        match_phrase: { normalized_dates: { query: normDate, boost: phraseBoosts.date_normalized ?? 5.0 } }
+      });
+    }
+  }
+
+  // Boost number matches
   for (const number of queryEntities.numbers) {
     phraseBoostClauses.push({
-      match_phrase: { content: { query: number, boost: 2.0 } }
+      match_phrase: { content: { query: number, boost: phraseBoosts.number_content ?? 2.0 } }
     });
     phraseBoostClauses.push({
-      match_phrase: { extracted_numbers: { query: number, boost: 3.5 } }
+      match_phrase: { extracted_numbers: { query: number, boost: phraseBoosts.number_extracted ?? 3.5 } }
     });
+  }
+
+  // Boost temporal unit matches (normalized durations)
+  if (queryEntities.temporal_units && queryEntities.temporal_units.length > 0) {
+    for (const unit of queryEntities.temporal_units) {
+      phraseBoostClauses.push({
+        match_phrase: { temporal_units: { query: unit, boost: phraseBoosts.temporal_unit ?? 4.5 } }
+      });
+    }
+  }
+
+  // Boost acronym matches (if query contains known acronyms, also match their expansions)
+  if (queryEntities.acronyms && queryEntities.acronyms.size > 0) {
+    for (const [acronym, expansion] of queryEntities.acronyms.entries()) {
+      // Boost documents that contain the expansion when query has acronym
+      phraseBoostClauses.push({
+        match_phrase: { content: { query: expansion, boost: phraseBoosts.acronym ?? 2.5 } }
+      });
+      phraseBoostClauses.push({
+        match_phrase: { content: { query: acronym, boost: phraseBoosts.acronym ?? 2.5 } }
+      });
+    }
   }
 
   const shouldClauses: any[] = [
@@ -1030,7 +1163,7 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
         query: {
           bool: {
             must: [
-              { match: { content: { query: String(q.objective ?? ""), operator: "or" } } }
+              { match: { content: { query: queryText, operator: "or" } } }  // Use expanded query
             ],
             // Move tenant/project terms to filter to avoid accidental scoring interference
             filter: [...(filter.bool.filter || []), ...(filter.bool.must || [])],
@@ -1062,7 +1195,7 @@ async function episodicSearch(q: RetrievalQuery, fopts: FilterOptions): Promise<
             must: [
               {
                 simple_query_string: {
-                  query: String(q.objective ?? ""),
+                  query: queryText,  // Use expanded query
                   fields: ["content^3", "content.raw^0.5", "tags^2"],
                   default_operator: "or"
                 }
@@ -1137,11 +1270,7 @@ function computedMinShouldMatch(q: string, pct: number): string | null {
   return null;
 }
 
-/** Heuristic: detect temporal counting questions where MMR should be disabled and date-bearing text boosted */
-function isTemporalQuery(q: string | undefined): boolean {
-  const s = (q || "").toLowerCase();
-  return /\b(how many days?|days? between|how long|number of days?|time difference|days? from|days? until|how many weeks?)\b/.test(s);
-}
+// Note: isTemporalQuery function is now imported from query-expansion.ts
 
 /**
  * Recency factor in [0,1], where 1 means "now", 0.5 at half-life in days.

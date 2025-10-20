@@ -6,6 +6,7 @@
        --dataset benchmarks/LongMemEval/data/longmemeval_oracle.json \\
        --tag memora
 */
+import "dotenv/config";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";

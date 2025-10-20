@@ -1,0 +1,50 @@
+{"question_id": "gpt4_2655b836", "hypothesis": "The first issue you had with your new car after its first service was a problem with the GPS system.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_2487a7cb", "hypothesis": "The 'Data Analysis using Python' webinar was attended first, two months ago, and the 'Effective Time Management' workshop was attended last Saturday.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_76048e76", "hypothesis": "You took care of the bike first in mid-February by getting it repaired.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_2312f94c", "hypothesis": "You got the Dell XPS 13 first.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": false}}
+{"question_id": "0bb5a684", "hypothesis": "7 days before the team meeting.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "08f4fc43", "hypothesis": "30 days had passed between the Sunday mass at St. Mary's Church on January 2nd and the Ash Wednesday service at the cathedral on February 1st.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "2c63a862", "hypothesis": "15 days.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_385a5000", "hypothesis": "The tomatoes were started first.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "2a1811e2", "hypothesis": "22 days had passed between the Hindu festival of Holi on February 26th and the Sunday mass at St. Mary's Church on March 19th.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "bbf86515", "hypothesis": "4 days before.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_5dcc0aab", "hypothesis": "You cleaned your white Adidas sneakers last month.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_0b2f1d21", "hypothesis": "The malfunction of the stand mixer happened first.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "f0853d11", "hypothesis": "14 days had passed between the \"Walk for Hunger\" event on February 21st and the \"Coastal Cleanup\" event on March 7th.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_6ed717ea", "hypothesis": "You purchased the training pads for Luna first, about a month ago, and the dog bed for Max three weeks ago.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_70e84552", "hypothesis": "You fixed the broken fence first, three weeks ago, and trimmed the goats' hooves two weeks ago.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "a3838d2b", "hypothesis": "You participated in one charity event before the \"Run for the Cure\" event\u2014the \"Dance for a Cause\" event on May 1st.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": false}}
+{"question_id": "gpt4_93159ced", "hypothesis": "I don't know.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": false}}
+{"question_id": "gpt4_2d58bcd6", "hypothesis": "You finished reading \"The Hate U Give\" first.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_65aabe59", "hypothesis": "You set up the smart thermostat first, about a month ago, and the mesh network system three weeks ago.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "982b5123", "hypothesis": "Three months ago.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": false}}
+{"question_id": "b9cfe692", "hypothesis": "You took about five and a half weeks combined to finish \"The Seven Husbands of Evelyn Hugo\" (two and a half weeks) and \"The Nightingale\" (three weeks).", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_4edbafa2", "hypothesis": "June 3rd", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "c8090214", "hypothesis": "You attended the Holiday Market a week before Black Friday, and you bought the iPhone 13 Pro on Black Friday. So, you attended the Holiday Market 7 days before buying the iPhone 13 Pro.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_483dd43c", "hypothesis": "You started watching \"The Crown\" first.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": false}}
+{"question_id": "e4e14d04", "hypothesis": "Three weeks.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "c9f37c46", "hypothesis": "I don't know.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": false}}
+{"question_id": "gpt4_2c50253f", "hypothesis": "You wake up 15 minutes earlier than usual on Tuesdays and Thursdays.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": false}}
+{"question_id": "dcfa8644", "hypothesis": "7 days had passed.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": false}}
+{"question_id": "gpt4_b4a80587", "hypothesis": "The arrival of the new prime lens happened first.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_9a159967", "hypothesis": "United Airlines", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "cc6d1ec1", "hypothesis": "You had been bird watching for about three months when you attended the bird watching workshop.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_8c8961ae", "hypothesis": "The trip to Thailand was first; it was a solo trip last year, and the Europe trip with family was just last month.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_d9af6064", "hypothesis": "You set up the smart thermostat first.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": false}}
+{"question_id": "gpt4_7de946e7", "hypothesis": "The persistent cough came first.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "d01c6aa8", "hypothesis": "I don't know.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": false}}
+{"question_id": "993da5e2", "hypothesis": "You rearranged your living room furniture three weeks ago, and you got the new area rug a month ago.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "a3045048", "hypothesis": "You ordered the gift 5 days before your best friend's birthday party.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": false}}
+{"question_id": "gpt4_d31cdae3", "hypothesis": "The family road trip across the American Southwest was taken first.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_cd90e484", "hypothesis": "You used your new binoculars for about two weeks before you saw the American goldfinches returning to the area.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_88806d6e", "hypothesis": "You met Mark and Sarah first.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": false}}
+{"question_id": "gpt4_4cd9eba1", "hypothesis": "You were accepted on March 20th and started attending pre-departure orientation sessions on March 27th, so you started attending 1 week after being accepted.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_93f6379c", "hypothesis": "You joined the \"Marketing Professionals\" group first.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": false}}
+{"question_id": "b29f3365", "hypothesis": "I don't know.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": false}}
+{"question_id": "gpt4_2f56ae70", "hypothesis": "Disney+", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "6613b389", "hypothesis": "Rachel got engaged on May 15th, and your anniversary is on July 22nd. The time between May 15th and July 22nd is about 2 months and 1 week.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_78cf46a3", "hypothesis": "The narrator lost their phone charger first, then received their new phone case about a month ago.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": false}}
+{"question_id": "gpt4_0a05b494", "hypothesis": "You met the woman selling jam at the farmer's market first.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_1a1dc16d", "hypothesis": "The meeting with Rachel happened first (April 10th), followed by the pride parade (May 1st).", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}
+{"question_id": "gpt4_2f584639", "hypothesis": "You bought the necklace for your sister first.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": false}}
+{"question_id": "gpt4_213fd887", "hypothesis": "You participated in the volleyball league first, about 2 months ago, and the charity 5K run about a month ago.", "autoeval_label": {"model": "gpt-4o-2024-08-06", "label": true}}

@@ -1,0 +1,11 @@
+metric,scope,tool,count,mean,p50,p95,sum
+llm_latency_ms,prediction,,100,0.000,0.000,0.000,
+tokens_in,prediction,,100,0.000,0.000,0.000,0
+tokens_out,prediction,,100,0.000,0.000,0.000,0
+mcp_latency_ms,telemetry,ALL,5480,0.698,0.374,0.884,
+mcp_latency_ms,telemetry,context.ensure_context,2,3.980,3.980,4.149,
+mcp_latency_ms,telemetry,context.set_context,2,1.155,1.155,1.256,
+mcp_latency_ms,telemetry,context.get_context,2638,0.361,0.312,0.655,
+mcp_latency_ms,telemetry,memory.write_if_salient,2638,0.466,0.409,0.793,
+mcp_latency_ms,telemetry,memory.retrieve,100,15.366,14.994,24.606,
+mcp_latency_ms,telemetry,memory.retrieve_and_pack,100,0.955,0.870,1.503,

@@ -24,6 +24,9 @@ export interface Event {
   extracted_dates?: string[];    // Extracted date references (ISO dates, temporal expressions)
   extracted_numbers?: string[];  // Extracted numbers with context
   extracted_entities?: string[]; // Extracted proper nouns (people, places, products, orgs)
+  normalized_dates?: string[];   // Normalized absolute dates from relative expressions (e.g., "yesterday" -> "2024-10-18")
+  temporal_units?: string[];     // Normalized temporal durations (e.g., "7 days", "2 weeks")
+  disambiguated_entities?: string[]; // Entities with disambiguation tags (e.g., "April [month]", "April [name]")
   context: Context;
 }
 

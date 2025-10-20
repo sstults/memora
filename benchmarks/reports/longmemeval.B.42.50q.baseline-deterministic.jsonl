@@ -1,0 +1,51 @@
+{"ts":"2025-10-19T22:14:35.132Z","op":"longmemeval_driver_start","dataset":"benchmarks/LongMemEval/data/longmemeval_oracle_50q.json","out":"benchmarks/reports/longmemeval.B.42.50q.baseline-deterministic.jsonl","variant":"B","seed":42}
+{"question_id":"gpt4_2655b836","hypothesis":"The first issue you had with your new car after its first service was a problem with the GPS system.","tokens_in":4275,"tokens_out":21,"llm_latency_ms":564.7036289999996}
+{"question_id":"gpt4_2487a7cb","hypothesis":"The 'Data Analysis using Python' webinar was attended first, two months ago, and the 'Effective Time Management' workshop was attended last Saturday.","tokens_in":5032,"tokens_out":29,"llm_latency_ms":1227.9403999999995}
+{"question_id":"gpt4_76048e76","hypothesis":"You took care of the bike first in mid-February by getting it repaired.","tokens_in":3919,"tokens_out":16,"llm_latency_ms":718.8311259999973}
+{"question_id":"gpt4_2312f94c","hypothesis":"You got the Dell XPS 13 first.","tokens_in":4685,"tokens_out":10,"llm_latency_ms":568.8631339999993}
+{"question_id":"0bb5a684","hypothesis":"7 days before the team meeting.","tokens_in":6351,"tokens_out":7,"llm_latency_ms":665.2652430000016}
+{"question_id":"08f4fc43","hypothesis":"30 days had passed between the Sunday mass at St. Mary's Church on January 2nd and the Ash Wednesday service at the cathedral on February 1st.","tokens_in":6268,"tokens_out":32,"llm_latency_ms":1790.5154420000035}
+{"question_id":"2c63a862","hypothesis":"15 days.","tokens_in":5333,"tokens_out":3,"llm_latency_ms":609.8284440000061}
+{"question_id":"gpt4_385a5000","hypothesis":"The tomatoes were started first.","tokens_in":4570,"tokens_out":6,"llm_latency_ms":657.8925699999963}
+{"question_id":"2a1811e2","hypothesis":"22 days had passed between the Hindu festival of Holi on February 26th and the Sunday mass at St. Mary's Church on March 19th.","tokens_in":4892,"tokens_out":31,"llm_latency_ms":857.1132129999896}
+{"question_id":"bbf86515","hypothesis":"4 days before.","tokens_in":5002,"tokens_out":4,"llm_latency_ms":561.8048929999932}
+{"question_id":"gpt4_5dcc0aab","hypothesis":"You cleaned your white Adidas sneakers last month.","tokens_in":2228,"tokens_out":9,"llm_latency_ms":624.2460370000044}
+{"question_id":"gpt4_0b2f1d21","hypothesis":"The malfunction of the stand mixer happened first.","tokens_in":5275,"tokens_out":9,"llm_latency_ms":474.132746999996}
+{"question_id":"f0853d11","hypothesis":"14 days had passed between the \"Walk for Hunger\" event on February 21st and the \"Coastal Cleanup\" event on March 7th.","tokens_in":6250,"tokens_out":31,"llm_latency_ms":701.1115929999942}
+{"question_id":"gpt4_6ed717ea","hypothesis":"You purchased the training pads for Luna first, about a month ago, and the dog bed for Max three weeks ago.","tokens_in":5543,"tokens_out":24,"llm_latency_ms":1261.9393430000055}
+{"question_id":"gpt4_70e84552","hypothesis":"You fixed the broken fence first, three weeks ago, and trimmed the goats' hooves two weeks ago.","tokens_in":4845,"tokens_out":22,"llm_latency_ms":818.5843610000011}
+{"question_id":"a3838d2b","hypothesis":"You participated in one charity event before the \"Run for the Cure\" event—the \"Dance for a Cause\" event on May 1st.","tokens_in":4733,"tokens_out":29,"llm_latency_ms":861.6922020000056}
+{"question_id":"gpt4_93159ced","hypothesis":"I don't know.","tokens_in":5931,"tokens_out":4,"llm_latency_ms":725.7425609999918}
+{"question_id":"gpt4_2d58bcd6","hypothesis":"You finished reading \"The Hate U Give\" first.","tokens_in":5468,"tokens_out":11,"llm_latency_ms":1413.5385919999972}
+{"question_id":"gpt4_65aabe59","hypothesis":"You set up the smart thermostat first, about a month ago, and the mesh network system three weeks ago.","tokens_in":6084,"tokens_out":22,"llm_latency_ms":680.9397379999864}
+{"question_id":"982b5123","hypothesis":"Three months ago.","tokens_in":5196,"tokens_out":4,"llm_latency_ms":364.5272100000002}
+{"question_id":"b9cfe692","hypothesis":"You took about five and a half weeks combined to finish \"The Seven Husbands of Evelyn Hugo\" (two and a half weeks) and \"The Nightingale\" (three weeks).","tokens_in":4644,"tokens_out":37,"llm_latency_ms":1634.4959840000083}
+{"question_id":"gpt4_4edbafa2","hypothesis":"June 3rd","tokens_in":5143,"tokens_out":4,"llm_latency_ms":675.8152980000013}
+{"question_id":"c8090214","hypothesis":"You attended the Holiday Market a week before Black Friday, and you bought the iPhone 13 Pro on Black Friday. So, you attended the Holiday Market 7 days before buying the iPhone 13 Pro.","tokens_in":5185,"tokens_out":43,"llm_latency_ms":1049.5462319999933}
+{"question_id":"gpt4_483dd43c","hypothesis":"You started watching \"The Crown\" first.","tokens_in":5348,"tokens_out":9,"llm_latency_ms":860.1133890000056}
+{"question_id":"e4e14d04","hypothesis":"Three weeks.","tokens_in":4368,"tokens_out":3,"llm_latency_ms":486.64155599998776}
+{"question_id":"c9f37c46","hypothesis":"I don't know.","tokens_in":6093,"tokens_out":4,"llm_latency_ms":868.3610139999946}
+{"question_id":"gpt4_2c50253f","hypothesis":"You wake up 15 minutes earlier than usual on Tuesdays and Thursdays.","tokens_in":4751,"tokens_out":14,"llm_latency_ms":857.0861740000255}
+{"question_id":"dcfa8644","hypothesis":"7 days had passed.","tokens_in":4176,"tokens_out":5,"llm_latency_ms":657.5139210000052}
+{"question_id":"gpt4_b4a80587","hypothesis":"The arrival of the new prime lens happened first.","tokens_in":6098,"tokens_out":10,"llm_latency_ms":1001.9994919999735}
+{"question_id":"gpt4_9a159967","hypothesis":"United Airlines","tokens_in":4548,"tokens_out":2,"llm_latency_ms":395.8023140000005}
+{"question_id":"cc6d1ec1","hypothesis":"You had been bird watching for about three months when you attended the bird watching workshop.","tokens_in":4887,"tokens_out":17,"llm_latency_ms":850.1821559999953}
+{"question_id":"gpt4_8c8961ae","hypothesis":"The trip to Thailand was first; it was a solo trip last year, and the Europe trip with family was just last month.","tokens_in":5736,"tokens_out":26,"llm_latency_ms":763.4515180000162}
+{"question_id":"gpt4_d9af6064","hypothesis":"You set up the smart thermostat first.","tokens_in":5258,"tokens_out":8,"llm_latency_ms":722.0065849999955}
+{"question_id":"gpt4_7de946e7","hypothesis":"The persistent cough came first.","tokens_in":4263,"tokens_out":6,"llm_latency_ms":449.67094399998314}
+{"question_id":"d01c6aa8","hypothesis":"I don't know.","tokens_in":6847,"tokens_out":4,"llm_latency_ms":751.3783769999864}
+{"question_id":"993da5e2","hypothesis":"You rearranged your living room furniture three weeks ago, and you got the new area rug a month ago.","tokens_in":3949,"tokens_out":22,"llm_latency_ms":1528.8287860000273}
+{"question_id":"a3045048","hypothesis":"You ordered the gift 5 days before your best friend's birthday party.","tokens_in":4780,"tokens_out":14,"llm_latency_ms":623.4406040000031}
+{"question_id":"gpt4_d31cdae3","hypothesis":"The family road trip across the American Southwest was taken first.","tokens_in":4522,"tokens_out":12,"llm_latency_ms":809.3228200000012}
+{"question_id":"gpt4_cd90e484","hypothesis":"You used your new binoculars for about two weeks before you saw the American goldfinches returning to the area.","tokens_in":5020,"tokens_out":23,"llm_latency_ms":884.3041560000274}
+{"question_id":"gpt4_88806d6e","hypothesis":"You met Mark and Sarah first.","tokens_in":3950,"tokens_out":7,"llm_latency_ms":686.9332040000008}
+{"question_id":"gpt4_4cd9eba1","hypothesis":"You were accepted on March 20th and started attending pre-departure orientation sessions on March 27th, so you started attending 1 week after being accepted.","tokens_in":6167,"tokens_out":34,"llm_latency_ms":900.4413560000248}
+{"question_id":"gpt4_93f6379c","hypothesis":"You joined the \"Marketing Professionals\" group first.","tokens_in":4650,"tokens_out":10,"llm_latency_ms":650.8077519999933}
+{"question_id":"b29f3365","hypothesis":"I don't know.","tokens_in":4563,"tokens_out":4,"llm_latency_ms":740.3269290000317}
+{"question_id":"gpt4_2f56ae70","hypothesis":"Disney+","tokens_in":4558,"tokens_out":2,"llm_latency_ms":722.9589949999936}
+{"question_id":"6613b389","hypothesis":"Rachel got engaged on May 15th, and your anniversary is on July 22nd. The time between May 15th and July 22nd is about 2 months and 1 week.","tokens_in":4505,"tokens_out":41,"llm_latency_ms":1103.3608430000022}
+{"question_id":"gpt4_78cf46a3","hypothesis":"The narrator lost their phone charger first, then received their new phone case about a month ago.","tokens_in":5205,"tokens_out":19,"llm_latency_ms":791.6795339999953}
+{"question_id":"gpt4_0a05b494","hypothesis":"You met the woman selling jam at the farmer's market first.","tokens_in":5113,"tokens_out":13,"llm_latency_ms":890.116640000022}
+{"question_id":"gpt4_1a1dc16d","hypothesis":"The meeting with Rachel happened first (April 10th), followed by the pride parade (May 1st).","tokens_in":5931,"tokens_out":23,"llm_latency_ms":916.1792240000213}
+{"question_id":"gpt4_2f584639","hypothesis":"You bought the necklace for your sister first.","tokens_in":4338,"tokens_out":9,"llm_latency_ms":522.1305060000159}
+{"question_id":"gpt4_213fd887","hypothesis":"You participated in the volleyball league first, about 2 months ago, and the charity 5K run about a month ago.","tokens_in":5902,"tokens_out":26,"llm_latency_ms":1780.5417800000287}

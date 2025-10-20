@@ -43,7 +43,7 @@ diversity:
 
 lexical:
   # Lexical/BM25 query tuning
-  multi_match_type: best_fields
+  multi_match_type: cross_fields  # or best_fields for independent field scoring
   tie_breaker: 0.3
   min_should_match_pct: 0    # diagnostic: disable MSM to prevent over-pruning
   use_shingles: true         # use *.shingles fields when available

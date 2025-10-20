@@ -1,0 +1,5 @@
+metric,scope,tool,count,mean,p50,p95,sum
+llm_latency_ms,prediction,,50,744.497,709.941,1114.520,
+tokens_in,prediction,,50,5047.560,5011.000,6259.900,252378
+tokens_out,prediction,,50,14.560,10.500,35.650,728
+mcp_latency_ms,telemetry,ALL,0,,,,
