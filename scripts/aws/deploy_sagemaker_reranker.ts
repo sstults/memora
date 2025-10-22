@@ -674,7 +674,9 @@ function huggingFaceImageForRegion(region: string): string {
       `No default HuggingFace container account for region ${region}. Pass --container-image explicitly.`,
     );
   }
-  return `${account}.dkr.ecr.${region}.amazonaws.com/huggingface-pytorch-inference:2.1.1-transformers4.37.0-gpu-py310-cu121-ubuntu20.04`;
+  // PyTorch 2.6.0 with transformers 4.51.3 - compatible with sentence-transformers CrossEncoder
+  // This image is verified to exist in us-east-1 and other major regions
+  return `${account}.dkr.ecr.${region}.amazonaws.com/huggingface-pytorch-inference:2.6.0-transformers4.51.3-gpu-py312-cu124-ubuntu22.04`;
 }
 
 const HUGGING_FACE_ACCOUNT_IDS: Record<string, string> = {

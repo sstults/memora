@@ -95,6 +95,18 @@ function parseScores(bodyText: string): number[] | null {
   // Try simple JSON parse first
   try {
     const parsed = JSON.parse(bodyText);
+
+    // Handle case where output_fn returns [body, content-type] tuple that gets JSON-serialized
+    if (Array.isArray(parsed) && parsed.length >= 1 && typeof parsed[0] === "string") {
+      try {
+        const inner = JSON.parse(parsed[0]);
+        const scores = extractScores(inner);
+        if (scores) return scores;
+      } catch {
+        // Fall through
+      }
+    }
+
     const scores = extractScores(parsed);
     if (scores) return scores;
   } catch {
