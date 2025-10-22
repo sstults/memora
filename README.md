@@ -224,6 +224,10 @@ Troubleshooting (alias conflict):
 - Reranking
   - MEMORA_RERANK_ENABLED: default false. When true, Memora performs a rerank step after fusion.
   - RERANK_ENDPOINT: optional HTTP service for rerank. If provided, Memora POSTs {query, candidates} and expects {scores}. If not provided, a lightweight local fallback reranker is used. When MEMORA_RERANK_ENABLED is false, no rerank step runs.
+  - RERANK_SAGEMAKER_ENDPOINT_NAME: optional SageMaker inference endpoint hosting a cross-encoder reranker (e.g., BGE large).
+    Memora signs requests with SigV4 using your local AWS credentials and posts `{inputs: { source_sentence, sentences[] }}`.
+    Additional knobs: `RERANK_SAGEMAKER_REGION`, `RERANK_SAGEMAKER_PROFILE`, `RERANK_SAGEMAKER_TIMEOUT_MS`,
+    `RERANK_SAGEMAKER_ACCEPT`, `RERANK_SAGEMAKER_CONTENT_TYPE`.
 - Eval mirroring
   - MEMORA_EVAL_EPISODIC_MIRROR: default false. When true, eval.log entries are mirrored to the episodic log as small events for easy timeline inspection.
 
@@ -251,6 +255,7 @@ Enable:
 
 Behavior:
 - If `OPENSEARCH_ML_RERANK_MODEL_ID` is set, Memora prefers ML Commons for rerank scores
+- Otherwise, if `RERANK_SAGEMAKER_ENDPOINT_NAME` is set, Memora calls that SageMaker runtime endpoint
 - Otherwise, if `RERANK_ENDPOINT` is set, Memora calls that HTTP service
 - If neither is configured or a call fails, Memora falls back to a lightweight local reranker
 
@@ -261,11 +266,81 @@ export OPENSEARCH_ML_RERANK_MODEL_ID=abc123            # your ML Commons reranke
 export OPENSEARCH_ML_RERANK_TIMEOUT_MS=1500             # optional, overrides timeout for OS-ML rerank
 # Optional HTTP fallback (used if OPENSEARCH_ML_RERANK_MODEL_ID is not set)
 # export RERANK_ENDPOINT=http://localhost:8081/rerank
+# export RERANK_SAGEMAKER_ENDPOINT_NAME=bge-reranker-prod
+```
+
+## AWS SageMaker Rerank (optional)
+
+Memora can directly invoke a hosted SageMaker endpoint for cross-encoder reranking (tested with the BAAI/BGE reranker family).
+This is useful when you want a managed, scalable reranker without exposing it through a separate HTTP service.
+
+Requirements:
+- A SageMaker Inference endpoint running your reranker model. We provide a helper script that creates a managed endpoint for
+  `BAAI/bge-reranker-large` with a custom inference handler that matches Memora's request/response contract.
+- Local AWS credentials with permissions for `sagemaker:InvokeEndpoint` (environment variables or shared config/credentials)
+
+Enable:
+- Set `MEMORA_RERANK_ENABLED=true`
+- Set `RERANK_SAGEMAKER_ENDPOINT_NAME=<your_endpoint_name>`
+- Optional overrides:
+  - `RERANK_SAGEMAKER_REGION` (falls back to `AWS_REGION`/`AWS_DEFAULT_REGION` or the profile's region)
+  - `RERANK_SAGEMAKER_PROFILE` (defaults to `AWS_PROFILE` or `default`)
+  - `RERANK_SAGEMAKER_TIMEOUT_MS` (defaults to `RERANK_TIMEOUT_MS`)
+  - `RERANK_SAGEMAKER_ACCEPT` / `RERANK_SAGEMAKER_CONTENT_TYPE`
+
+Behavior:
+- If `RERANK_SAGEMAKER_ENDPOINT_NAME` is set, Memora signs requests with SigV4 and calls SageMaker directly
+- SageMaker responses are parsed for numeric scores (arrays, objects with `scores`/`outputs`, or JSON lines)
+- On failure, Memora falls back to the configured HTTP reranker (if any) or the local lexical/cosine reranker
+
+Example:
+```bash
+export MEMORA_RERANK_ENABLED=true
+export RERANK_SAGEMAKER_ENDPOINT_NAME=bge-reranker-prod
+export RERANK_SAGEMAKER_REGION=us-west-2              # optional if profile/environment already set
+export RERANK_SAGEMAKER_PROFILE=memora-rerank         # optional profile name in ~/.aws/{config,credentials}
+export RERANK_SAGEMAKER_TIMEOUT_MS=2000               # optional timeout override per request
 ```
 
 Notes:
 - This is separate from “Embeddings via OpenSearch ML Pipelines.” Embedding pipelines generate vectors on write/search. Cross-encoder rerank runs at response-time to rescore shortlists.
 - You can also configure an OpenSearch search pipeline with a `rerank` response processor if you prefer server-side orchestration (see examples in this README).
+
+### Provision a SageMaker endpoint for BGE reranking
+
+The repository includes a deployment utility that bundles a lightweight inference handler, uploads it to S3, and wires up the
+required SageMaker model, endpoint configuration, and managed endpoint:
+
+```bash
+# 1. Ensure you have an execution role with SageMaker + S3 access (e.g., AmazonSageMakerFullAccess) and note its ARN.
+# 2. (Optional) export defaults for the AWS profile/region.
+export AWS_PROFILE=memora-rerank
+export AWS_REGION=us-west-2
+
+# 3. Deploy the reranker (creates an artifact bucket if none provided, then provisions model/config/endpoint).
+node --import ./scripts/register-ts-node.mjs scripts/aws/deploy_sagemaker_reranker.ts \
+  --role-arn arn:aws:iam::123456789012:role/MemoraSageMakerExecutionRole \
+  --endpoint-name memora-bge-reranker \
+  --instance-type ml.g5.2xlarge
+
+# 4. Wait for the command to report `Endpoint is InService` (can take ~15 minutes).
+#    The script prints the S3 location of the uploaded model artifact for reuse.
+
+# 5. Point Memora at the freshly created endpoint.
+export RERANK_SAGEMAKER_ENDPOINT_NAME=memora-bge-reranker
+export MEMORA_RERANK_ENABLED=true
+```
+
+Flags of note:
+
+- `--artifact-bucket` / `--artifact-key`: reuse an existing S3 bucket and object key for the `model.tar.gz` archive.
+- `--model-data-url`: skip the upload step and point the deployment at a pre-existing artifact in S3.
+- `--no-wait`: return immediately after issuing the `CreateEndpoint`/`UpdateEndpoint` call.
+- `--subnet-ids` + `--security-group-ids`: place the model inside a VPC.
+- `--extra-env`: add additional container environment variables (comma-separated `KEY=VALUE`).
+
+The generated artifact contains `code/inference.py`, which adapts the Hugging Face CrossEncoder API so that the endpoint accepts
+payloads of the form `{"inputs": {"source_sentence": "query", "sentences": ["doc1", ...]}}` and responds with `{ "scores": [..] }`.
 
 ## Minimal API
 

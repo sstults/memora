@@ -20,6 +20,7 @@ import { Hit as FusedHit } from "../domain/fusion.js";
 import { debug } from "./log.js";
 import { predictRerankScores } from "./os-ml.js";
 import { retrievalBoolean } from "./config.js";
+import { invokeSageMakerRerank } from "./sagemaker.js";
 
 export interface RerankOptions {
   maxCandidates?: number;  // default 64
@@ -33,6 +34,8 @@ const TIMEOUT_MS = numFromEnv("RERANK_TIMEOUT_MS", 1500);
 const MAX_RETRIES = numFromEnv("RERANK_MAX_RETRIES", 2);
 const OS_RERANK_MODEL_ID = process.env.OPENSEARCH_ML_RERANK_MODEL_ID;
 const OS_RERANK_TIMEOUT_MS = numFromEnv("OPENSEARCH_ML_RERANK_TIMEOUT_MS", TIMEOUT_MS);
+const SAGEMAKER_ENDPOINT = process.env.RERANK_SAGEMAKER_ENDPOINT_NAME || "";
+const SAGEMAKER_TIMEOUT_MS = numFromEnv("RERANK_SAGEMAKER_TIMEOUT_MS", TIMEOUT_MS);
 const log = debug("memora:rerank");
 // Rerank gating: env override if set, else fall back to retrieval.yaml (rerank.enabled)
 const ENV_RERANK = process.env.MEMORA_RERANK_ENABLED;
@@ -81,6 +84,36 @@ export async function crossRerank(
     } catch (err) {
       log("osml.error", { message: (err as Error).message });
       console.warn(`[rerank] OpenSearch ML rerank failed: ${(err as Error).message}. Falling back.`);
+    }
+  }
+
+  // SageMaker cross-encoder rerank if configured
+  if (SAGEMAKER_ENDPOINT) {
+    try {
+      const r0 = Date.now();
+      const scores = await invokeSageMakerRerank({
+        endpointName: SAGEMAKER_ENDPOINT,
+        query,
+        passages: candidates.map(c => c.text || ""),
+        timeoutMs: Math.max(250, Math.min(SAGEMAKER_TIMEOUT_MS, opts.budgetMs ?? SAGEMAKER_TIMEOUT_MS)),
+      });
+
+      const reweighted = candidates.map((c, i) => ({
+        ...c,
+        score: isFiniteNumber(scores[i]) ? scores[i] : c.score
+      }));
+      log("sagemaker.ok", { tookMs: Date.now() - r0, candidates: candidates.length });
+
+      const fusedIds = new Set(reweighted.map(r => r.id));
+      const tail = hits.filter(h => !fusedIds.has(h.id));
+      reweighted.sort((a, b) => b.score - a.score);
+      const delta = rankDeltaStats(candidates, reweighted);
+      log("sagemaker.delta", delta);
+      log("sagemaker.end", { totalMs: Date.now() - started, out: reweighted.length });
+      return [...reweighted, ...tail];
+    } catch (err) {
+      log("sagemaker.error", { message: (err as Error).message });
+      console.warn(`[rerank] SageMaker rerank failed: ${(err as Error).message}. Falling back.`);
     }
   }
 
