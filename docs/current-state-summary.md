@@ -10,12 +10,14 @@
 
 ### LongMemEval Benchmark Results
 
-| Configuration | Accuracy | Details |
-|---------------|----------|---------|
-| **Baseline (lexical-only)** | **76%** | 38/50 questions correct (seed 42) |
-| With SageMaker reranking | 77% | +1% improvement, 13x latency cost |
+| Configuration | Dataset | Accuracy | Details |
+|---------------|---------|----------|---------|
+| **Baseline (lexical-only)** | 500q | **71%** | 710/1000 correct (seed 42) |
+| Baseline (lexical-only) | 50q subset | 76% | 38/50 correct (likely inflated, small sample) |
+| With SageMaker reranking | 50q subset | 77% | +1% improvement, 13x latency cost |
+| With structured reasoning | 500q | 73.2% | 732/1000 correct (+2.2% vs baseline, 2x LLM cost) |
 
-**Achievement**: 🎯 **75%+ accuracy target reached** with lexical-only approach
+**Status**: 71% accuracy on full 500q dataset. Below initial 75% target, requires improvement.
 
 ---
 
@@ -96,7 +98,7 @@
 ---
 
 ### 5. Structured Temporal Reasoning ✅
-**Status**: COMPLETE - Tested, not recommended for deployment
+**Status**: COMPLETE - Tested, modest improvement but high cost
 **Documentation**: `benchmarks/services/temporal-reasoning.ts`
 
 **Implementation**:
@@ -106,20 +108,19 @@
 
 **Results on 500q dataset**:
 - Accuracy: **73.2%** (732/1000 correct)
-- Baseline: **76%** (38/50 on 50q subset)
-- **Degradation: -2.8% from baseline**
+- Baseline: **71%** (710/1000 on full 500q)
+- **Improvement: +2.2% absolute**
 
 **Cost Analysis**:
 - 2x LLM calls per question (extraction + answer)
-- Mean tokens in: 13,424 (vs baseline ~7,000)
-- Mean latency: 1,401ms per question
+- Mean tokens in: 13,424 (vs baseline 13,027)
+- Mean latency: 1,401ms per question (vs baseline 1,499ms)
 - MCP latency: memory.write 18.5ms, memory.retrieve 33.4ms
 
-**Decision**: ❌ **Do NOT deploy**
-- No accuracy improvement (actually worse)
-- Doubles LLM API costs
-- Potential causes: extraction errors, date parsing failures, context overflow from prepended analysis
-- Temporal reasoning may not be the primary failure mode
+**Decision**: ⚠️ **Limited benefit, high cost**
+- Small improvement (+2.2%) with 2x LLM API cost
+- Cost-benefit ratio not favorable
+- May be worth revisiting with cheaper extraction models
 
 ---
 
@@ -201,14 +202,15 @@
 
 ## Recommendations
 
-### Short-Term: Production-Ready State ✅
-**Current baseline is solid**:
-- 76% accuracy with lexical-only search
-- Fast retrieval (15ms median)
+### Short-Term: Additional Optimization Needed
+**Current baseline**: 71% accuracy (below 75% target)
+- Fast retrieval (37ms median for memory.retrieve)
 - No external dependencies (SageMaker, semantic index)
 - Self-documenting benchmark framework
 
-**Recommendation**: **Deploy current configuration to production**
+**Recommendation**: **Continue optimization before production deployment**
+- Focus on LLM reasoning improvements (enhanced prompting, Option A)
+- Target: 75%+ accuracy on full 500q dataset
 
 ---
 
@@ -221,11 +223,11 @@ Since retrieval is working, focus on improving LLM temporal reasoning:
 - Request step-by-step reasoning for temporal questions
 - Extract dates/events to structured format before reasoning
 
-**Option B: Structured Reasoning Pipeline** ❌ **TESTED - Not Effective**
-- Result: **73.2%** on 500q (worse than 76% baseline)
+**Option B: Structured Reasoning Pipeline** ✅ **TESTED - Small improvement, high cost**
+- Result: **73.2%** on 500q (+2.2% vs 71% baseline)
 - Implementation: `benchmarks/services/temporal-reasoning.ts`
-- Issues: Extraction errors, context overflow, 2x LLM cost
-- Not recommended for deployment
+- Cost: 2x LLM API calls per question
+- Not recommended due to poor cost-benefit ratio
 
 **Option C: Different LLM** (Not yet tested)
 - Try GPT-4 Turbo, Claude 3 Opus, Gemini Pro
