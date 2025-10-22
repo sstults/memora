@@ -25,7 +25,8 @@
     "dev:trace:stats": "bash scripts/dev/trace_stats.sh",
     "dev:trace:stats:sample": "SAMPLE=1 bash scripts/dev/trace_stats.sh",
     "smoke:write": "node --import ./scripts/register-ts-node.mjs scripts/dev/mcp_write_smoke.ts",
-    "smoke:retrieve": "node --import ./scripts/register-ts-node.mjs scripts/dev/mcp_retrieve_smoke.ts"
+    "smoke:retrieve": "node --import ./scripts/register-ts-node.mjs scripts/dev/mcp_retrieve_smoke.ts",
+    "deploy:sagemaker": "node --import ./scripts/register-ts-node.mjs scripts/aws/deploy_sagemaker_reranker.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.19.1",
