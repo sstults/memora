@@ -7,6 +7,8 @@ export interface ExpandedQuery {
   expanded: string;
   expansions: string[];
   hadTemporalExpansion: boolean;
+  hadEntityExpansion: boolean;
+  entityFocusedQueries: string[];
 }
 
 // Temporal synonym mappings for common relative time references
@@ -115,6 +117,106 @@ const DURATION_PATTERNS = [
   }}
 ];
 
+// Question patterns that indicate temporal reasoning or comparison queries
+const TEMPORAL_REASONING_PATTERNS = [
+  /\bhow many (days|weeks|months|years|hours)\b/i,
+  /\b(which|what).*(first|last|before|after)\b/i,
+  /\bbetween\s+.+\s+and\s+/i,
+  /\b(happened|occurred|did|took place)\s+(first|last|before|after)\b/i,
+  /\b(how long|when did|what time)\b/i,
+];
+
+/**
+ * Extract key entities (capitalized phrases, dates, locations) from a query.
+ * Focuses on named entities that should be preserved in entity-focused subqueries.
+ */
+function extractKeyEntities(query: string): string[] {
+  const entities: Set<string> = new Set();
+
+  // Extract capitalized phrases (proper nouns, locations, names)
+  // Matches: "St. Mary's Church", "Ash Wednesday", "Australia", etc.
+  // Pattern allows for: Title case words, possessives ('s), abbreviations (St., Dr.)
+  const capitalizedPattern = /\b(?:[A-Z][a-z]*\.?\s*)+(?:'s\s+)?(?:[A-Z][a-z]+\b)+/g;
+  const capitalizedMatches = query.matchAll(capitalizedPattern);
+  for (const match of capitalizedMatches) {
+    const entity = match[0].trim();
+    // Skip common question words and short entities
+    if (entity.length > 2 && !['Which', 'What', 'When', 'Where', 'Who', 'How', 'Why', 'The', 'And', 'Or'].includes(entity)) {
+      entities.add(entity);
+    }
+  }
+
+  // Extract quoted phrases (explicit entities)
+  const quotedPattern = /"([^"]+)"|'([^']+)'/g;
+  const quotedMatches = query.matchAll(quotedPattern);
+  for (const match of quotedMatches) {
+    const quoted = match[1] || match[2];
+    if (quoted && quoted.length > 2) {
+      entities.add(quoted);
+    }
+  }
+
+  // Extract month names (temporal entities)
+  const monthPattern = /\b(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(?:and|&)\s+\b(january|february|march|april|may|june|july|august|september|october|november|december))?\b/gi;
+  const monthMatches = query.matchAll(monthPattern);
+  for (const match of monthMatches) {
+    // Add the full match (e.g., "March and April")
+    entities.add(match[0]);
+  }
+
+  // Extract day of week patterns
+  const dowPattern = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:s)?(?:\s+(?:and|&)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:s)?)?\b/gi;
+  const dowMatches = query.matchAll(dowPattern);
+  for (const match of dowMatches) {
+    entities.add(match[0]);
+  }
+
+  return Array.from(entities);
+}
+
+/**
+ * Detect if query is a temporal reasoning or comparison query.
+ * These benefit most from entity-focused expansion.
+ */
+function isTemporalReasoningQuery(query: string): boolean {
+  return TEMPORAL_REASONING_PATTERNS.some(pattern => pattern.test(query));
+}
+
+/**
+ * Generate entity-focused subqueries for temporal/ordering questions.
+ *
+ * Example:
+ *   Query: "How many days between Sunday mass at St. Mary's and Ash Wednesday service?"
+ *   Entity queries: ["Sunday mass St. Mary's", "Ash Wednesday service", "church cathedral"]
+ *
+ * This helps match documents that mention the entities even if they don't contain
+ * the temporal calculation words ("how many days", "between").
+ */
+function generateEntityFocusedQueries(query: string, entities: string[]): string[] {
+  if (entities.length === 0) {
+    return [];
+  }
+
+  const subqueries: string[] = [];
+
+  // Strategy 1: Individual entity queries
+  for (const entity of entities) {
+    subqueries.push(entity);
+  }
+
+  // Strategy 2: For temporal reasoning queries with 2+ entities, pair them
+  if (isTemporalReasoningQuery(query) && entities.length >= 2) {
+    // Add pairwise combinations for ordering/comparison questions
+    for (let i = 0; i < Math.min(entities.length, 3); i++) {
+      for (let j = i + 1; j < Math.min(entities.length, 3); j++) {
+        subqueries.push(`${entities[i]} ${entities[j]}`);
+      }
+    }
+  }
+
+  return subqueries;
+}
+
 /**
  * Expand query with temporal synonyms and duration calculations.
  * This improves recall for queries with relative time references.
@@ -123,6 +225,8 @@ export function expandQuery(query: string): ExpandedQuery {
   const expansions: Set<string> = new Set();
   let expanded = query;
   let hadTemporalExpansion = false;
+  let hadEntityExpansion = false;
+  const entityFocusedQueries: string[] = [];
 
   // Step 1: Apply dictionary-based temporal synonym expansion
   const lowerQuery = query.toLowerCase();
@@ -152,11 +256,28 @@ export function expandQuery(query: string): ExpandedQuery {
     }
   }
 
+  // Step 3: Extract entities and generate entity-focused subqueries
+  const keyEntities = extractKeyEntities(query);
+  if (keyEntities.length > 0) {
+    const entityQueries = generateEntityFocusedQueries(query, keyEntities);
+    if (entityQueries.length > 0) {
+      hadEntityExpansion = true;
+      entityFocusedQueries.push(...entityQueries);
+
+      // Add entity queries to main expanded query
+      for (const eq of entityQueries) {
+        expanded += ` ${eq}`;
+      }
+    }
+  }
+
   return {
     original: query,
     expanded: expanded.trim(),
     expansions: Array.from(expansions),
-    hadTemporalExpansion
+    hadTemporalExpansion,
+    hadEntityExpansion,
+    entityFocusedQueries
   };
 }
 
