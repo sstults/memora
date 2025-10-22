@@ -129,7 +129,7 @@ async function main() {
     const credentials = resolveAwsCredentials(profile);
 
     let modelDataUrl = explicitModelDataUrl || "";
-    let reuseModelData = Boolean(explicitModelDataUrl);
+    const reuseModelData = Boolean(explicitModelDataUrl);
     let resolvedBucket = artifactBucket;
 
   if (!reuseModelData) {
@@ -292,7 +292,7 @@ async function createBucket(bucket: string, region: string, credentials: AwsCred
   const body =
     region === "us-east-1"
       ? ""
-      : `<CreateBucketConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><LocationConstraint>${region}</LocationConstraint></CreateBucketConfiguration>`;
+      : `<CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><LocationConstraint>${region}</LocationConstraint></CreateBucketConfiguration>`;
   const headers: Record<string, string> = { "Content-Type": "application/xml" };
   if (!body) {
     headers["Content-Length"] = "0";

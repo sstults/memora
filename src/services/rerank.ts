@@ -23,7 +23,7 @@ import { retrievalBoolean } from "./config.js";
 import { invokeSageMakerRerank } from "./sagemaker.js";
 
 export interface RerankOptions {
-  maxCandidates?: number;  // default 64
+  maxCandidates?: number;  // default 50 (found effective based on lexical analysis)
   budgetMs?: number;       // overall latency guard (best-effort)
   model?: string;          // sent to the endpoint
 }
@@ -46,7 +46,7 @@ export async function crossRerank(
   hits: FusedHit[],
   opts: RerankOptions = {}
 ): Promise<FusedHit[]> {
-  const maxC = Math.min(opts.maxCandidates ?? 64, 128);
+  const maxC = Math.min(opts.maxCandidates ?? 50, 128);
   const candidates = hits.slice(0, maxC);
   if (candidates.length <= 1) return hits;
   if (!ENABLED) {

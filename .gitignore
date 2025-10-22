@@ -143,3 +143,13 @@ vite.config.ts.timestamp-*
 
 # Memora traces (local diagnostics)
 outputs/memora/trace/*.ndjson
+
+# Claude Code
+.claude/
+
+# Temporary experiment files
+/tmp/longmemeval*.log
+models/
+
+# SageMaker build artifacts
+scripts/aws/.build/

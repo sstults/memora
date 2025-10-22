@@ -18,6 +18,7 @@ import { z } from "zod";
 import { requireContext } from "./context.js";
 import { buildBoolFilter, FilterOptions } from "../domain/filters.js";
 import { fuseAndDiversify, type Hit as FusedHit } from "../domain/fusion.js";
+import { crossRerank } from "../services/rerank.js";
 import {
   Context,
   Event,
@@ -478,7 +479,7 @@ async function handleWrite(req: any) {
         traceWrite("episodic.index.fail", { index: episodicIndex, id: _id, result, statusCode });
         throw new Error(`Episodic index failed: status=${statusCode} result=${result}`);
       }
-    } catch (inner) {
+    } catch (_inner) {
       // If parsing failed, still continue to ok trace below; outer catch will handle thrown errors
     }
     traceWrite("episodic.index.ok", { index: episodicIndex, id: event.event_id });
@@ -675,7 +676,7 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
       });
       traceWrite("retrieve.guard.after_ctx", { hasActive: true });
     } catch { /* ignore */ void 0; }
-  } catch (err) {
+  } catch (_err) {
     // Fallback when no active context is set: use default tenant/project and any provided params
     const p: any = (req as any)?.params || {};
     const tenant = process.env.MEMORA_DEFAULT_TENANT || "memora";
@@ -785,6 +786,16 @@ async function handleRetrieve(req: any): Promise<RetrievalResult> {
     fused = episodicHits.slice(0, budget);
   }
   log("fuse", { episodic: episodicHits.length, semantic: semanticHits.length, facts: factHits.length, fused: fused.length });
+
+  // Optional rerank stage (gated by MEMORA_RERANK_ENABLED or retrieval.yaml: rerank.enabled)
+  try {
+    const maxC = retrievalNumber("rerank.max_candidates", 50);
+    const budgetMs = retrievalNumber("rerank.budget_ms", 1200);
+    const model = retrievalString("rerank.model", "bge-reranker");
+    fused = await crossRerank(String(q2.objective ?? ""), fused, { maxCandidates: maxC, budgetMs, model });
+  } catch (e) {
+    log("rerank.skip_or_error", { err: String(e) });
+  }
 
 
   // Touch last_used for semantic docs we return (only when semantic enabled)
