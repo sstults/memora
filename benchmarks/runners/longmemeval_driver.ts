@@ -255,7 +255,18 @@ async function answerWithOpenAI(openai: any, llmCfg: any, question: string, cont
   const temperature = typeof llmCfg?.temperature === "number" ? llmCfg.temperature : 0.0;
   const max_tokens = typeof llmCfg?.max_tokens === "number" ? llmCfg.max_tokens : 512;
 
-  const sys = "You are a focused assistant for question answering over provided context. Use the context if relevant; if the answer is not present, reply with \"I don't know\". Respond concisely with just the final answer, no explanation.";
+  const sys = `You are a focused assistant for question answering over provided context.
+
+When answering questions about dates, times, and events:
+- Pay careful attention to chronological order (e.g., January comes before February, the 1st comes before the 2nd)
+- When comparing dates or events, identify which occurred first by examining their specific dates or timestamps
+- For duration questions (e.g., "how many days"), extract the specific dates from context and calculate the difference accurately
+- For ordering questions (e.g., "which happened first"), compare the dates or timestamps to determine the sequence
+- Consider all date formats: month names (January, February), numeric dates (1/15, 2/10), and relative references
+
+General instructions:
+- Use the context if relevant; if the answer is not present, reply with "I don't know"
+- Respond concisely with just the final answer, no explanation`;
   const user = `Context:
 ${context}
 
@@ -327,19 +338,40 @@ async function main() {
   const { dataset, out, variant, seed, qids, replayMode, budget, scopeProject } = parseArgs(process.argv.slice(2));
   ensureDirForFile(out);
 
-  // Write a header for traceability
-  writeJSONL(out, {
-    ts: new Date().toISOString(),
-    op: "longmemeval_driver_start",
-    dataset,
-    out,
-    variant,
-    seed
-  });
-
-  // Load configs and initialize LLM
+  // Load configs first for metadata
   const llmCfg = loadJSON<any>("benchmarks/config/llm.json");
   const memoraCfg = loadJSON<any>("benchmarks/config/memora.json");
+
+  // Write comprehensive metadata header for traceability and comparability
+  writeJSONL(out, {
+    _metadata: {
+      timestamp: new Date().toISOString(),
+      dataset: {
+        path: dataset,
+        name: path.basename(dataset, ".json")
+      },
+      variant,
+      seed,
+      budget,
+      config: {
+        llm: {
+          model: llmCfg?.model ?? "gpt-4.1-mini",
+          temperature: typeof llmCfg?.temperature === "number" ? llmCfg.temperature : 0.0,
+          max_tokens: typeof llmCfg?.max_tokens === "number" ? llmCfg.max_tokens : 512
+        },
+        memora: {
+          retrieval_budget: typeof memoraCfg?.retrieval_budget === "number" ? memoraCfg.retrieval_budget : budget,
+          query_expansion_enabled: memoraCfg?.query_expansion_enabled ?? true,
+          semantic_enabled: process.env.MEMORA_SEMANTIC_ENABLED !== "false",
+          rerank_enabled: process.env.MEMORA_RERANK_ENABLED === "true"
+        }
+      },
+      memora_version: "0.1.0",
+      git_commit: process.env.GIT_COMMIT || "unknown"
+    }
+  });
+
+  // Initialize LLM
   const openai = await createOpenAI();
 
   // Load dataset

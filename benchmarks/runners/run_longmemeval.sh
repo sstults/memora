@@ -200,6 +200,18 @@ fi
 # Ensure output directory exists
 mkdir -p "$(dirname "$OUT")"
 
+# Get dataset information early for configuration output
+# Note: This assumes dataset exists, which is validated later
+if [[ -f "${DATASET}" ]]; then
+  DATASET_NAME=$(basename "${DATASET}" .json)
+  DATASET_QUESTION_COUNT=$(grep -c '"question"' "${DATASET}" 2>/dev/null || echo "unknown")
+  DATASET_CONTEXT_COUNT=$(grep -c '"context"' "${DATASET}" 2>/dev/null || echo "unknown")
+else
+  DATASET_NAME="(not found)"
+  DATASET_QUESTION_COUNT="unknown"
+  DATASET_CONTEXT_COUNT="unknown"
+fi
+
 # Logging configuration
 LOG_DIR="benchmarks/logs"
 mkdir -p "${LOG_DIR}"
@@ -213,6 +225,9 @@ log_phase "LongMemEval Benchmark Configuration"
 echo "Variant:          ${VARIANT}"
 echo "Seed:             ${SEED}"
 echo "Dataset:          ${DATASET}"
+echo "  Name:           ${DATASET_NAME}"
+echo "  Questions:      ${DATASET_QUESTION_COUNT}"
+echo "  Contexts:       ${DATASET_CONTEXT_COUNT}"
 echo "Output:           ${OUT}"
 echo "Tag:              ${TAG}"
 echo
@@ -278,6 +293,9 @@ fi
 
 # Ensure ts-node registration is available for TS runners in this repo
 NODE_RUNNER="node --import ./scripts/register-ts-node.mjs"
+
+# Export git commit for metadata tracking
+export GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
 # Configure Memora for accurate retrieval when running Variant C:
 # - Use OpenSearch ML ingest pipeline for embeddings (replaces local fallback)
